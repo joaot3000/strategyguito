@@ -6,6 +6,7 @@ import email
 from email.policy import default
 import logging
 from flask import Flask, jsonify, request
+import threading
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -129,5 +130,32 @@ def trigger_email_check():
 def health_check():
     return jsonify({"status": "Service is running"}), 200
 
+# Background task to check for emails and place trades every 40 seconds
+def background_task():
+    while True:
+        try:
+            emails = fetch_alert_emails()
+            trades = []
+            for email_content in emails:
+                trade_data = parse_email(email_content)
+                if trade_data:
+                    action = trade_data["action"]
+                    symbol = trade_data["symbol"]
+                    if action in ['buy', 'sell']:
+                        result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
+                        trades.append({"symbol": symbol, "action": action, "result": result})
+            time.sleep(40)  # Wait 40 seconds before checking again
+        except Exception as e:
+            logging.error(f"Error in background task: {e}")
+            time.sleep(40)  # Wait before retrying if an error occurs
+
+# Start the background task in a separate thread
+@app.before_first_request
+def start_background_task():
+    thread = threading.Thread(target=background_task)
+    thread.daemon = True
+    thread.start()
+
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
+
