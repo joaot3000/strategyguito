@@ -71,8 +71,48 @@ def parse_email(content):
         }
     return None
 
+def get_existing_position(symbol):
+    """Check if there is an existing position for the given symbol."""
+    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
+    }
+    try:
+        response = requests.get(endpoint, headers=headers)
+        if response.status_code == 200:
+            return response.json()  # Return the position details if it exists
+        elif response.status_code == 404:
+            return None  # No position exists for this symbol
+        else:
+            logging.error(f"Failed to fetch position for {symbol}. Response: {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error during request: {e}")
+        return None
+
+def close_position(symbol):
+    """Close the existing position for the given symbol."""
+    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
+    }
+    try:
+        response = requests.delete(endpoint, headers=headers)
+        if response.status_code == 200:
+            logging.info(f"Closed position for {symbol}: {response.json()}")
+            return True
+        else:
+            logging.error(f"Failed to close position for {symbol}. Response: {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error during request: {e}")
+        return False
+
 def place_trade(symbol, side, qty=0.014):
-    endpoint = f"https://paper-api.alpaca.markets/v2/orders"
+    """Place a new trade (buy or sell)."""
+    endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
@@ -106,6 +146,20 @@ def place_trade(symbol, side, qty=0.014):
         logging.error(f"Error during request: {e}")
         return None
 
+def process_trade(symbol, action):
+    """Process a trade by closing the existing position (if any) and placing a new one."""
+    # Check if there is an existing position for the symbol
+    existing_position = get_existing_position(symbol)
+    if existing_position:
+        logging.info(f"Existing position found for {symbol}. Closing it...")
+        if not close_position(symbol):
+            logging.error(f"Failed to close existing position for {symbol}.")
+            return None
+
+    # Place the new trade
+    logging.info(f"Placing new {action} order for {symbol}...")
+    return place_trade(symbol, action)
+
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
@@ -118,7 +172,7 @@ def trigger_email_check():
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 if action in ['buy', 'sell']:
-                    result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
+                    result = process_trade(symbol, action)  # Process the trade
                     trades.append({"symbol": symbol, "action": action, "result": result})
         return jsonify({"message": "Email check complete", "trades": trades}), 200
     except Exception as e:
@@ -142,7 +196,7 @@ def background_task():
                     action = trade_data["action"]
                     symbol = trade_data["symbol"]
                     if action in ['buy', 'sell']:
-                        result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
+                        result = process_trade(symbol, action)  # Process the trade
                         trades.append({"symbol": symbol, "action": action, "result": result})
             time.sleep(40)  # Wait 40 seconds before checking again
         except Exception as e:
