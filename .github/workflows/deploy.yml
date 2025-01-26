@@ -2,7 +2,7 @@ name: Deploy to Render
 
 on:
   schedule:
-    # This will run the workflow every hour (cron format)
+    # This will run the workflow every 10 minutes (cron format)
     - cron: "*/10 * * * *"
   push:
     branches:
@@ -36,5 +36,4 @@ jobs:
           curl -X POST https://api.render.com/deploy/srv-cu9cqqbtq21c73aht0dg?key=ZQzzIgramO0
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}  # Using your Render API key stored as a secret
-
 
