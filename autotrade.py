@@ -59,15 +59,27 @@ def fetch_alert_emails():
         return emails
 
 def parse_email(content):
-    # Extract action (buy/sell) and symbol from the email content
-    action_match = re.search(r"Action: (buy|sell)", content, re.IGNORECASE)
-    symbol_match = re.search(r"Symbol: ([A-Z]+(?:/[A-Z]+)?)", content, re.IGNORECASE)
-    
+    logging.info(f"Parsing email content: {content}")  # Log full email content to verify
+
+    # Extract action (buy/sell) and symbol from the alert message content
+    action_match = re.search(r"Action[:\s]*([a-zA-Z]+)", content, re.IGNORECASE)
+    symbol_match = re.search(r"Symbol[:\s]*([A-Za-z0-9]+)", content, re.IGNORECASE)
+
+    if action_match:
+        logging.info(f"Action found: {action_match.group(1)}")
+    else:
+        logging.warning("Action not found in the email.")
+
+    if symbol_match:
+        logging.info(f"Symbol found: {symbol_match.group(1)}")
+    else:
+        logging.warning("Symbol not found in the email.")
+
     # If both action and symbol are found, return them
     if action_match and symbol_match:
         return {
             "action": action_match.group(1).lower(),  # Store the action as "buy" or "sell" (in lowercase)
-            "symbol": symbol_match.group(1).upper()   # Symbol should be uppercase (e.g., BTC/USD)
+            "symbol": symbol_match.group(1).upper()   # Symbol should be uppercase (e.g., BTCUSD)
         }
     return None
 
