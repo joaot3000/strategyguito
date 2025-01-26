@@ -3,7 +3,7 @@ name: Deploy to Render
 on:
   schedule:
     # This will run the workflow every hour (cron format)
-    - cron: "0 * * * *"
+    - cron: "*/10 * * * *"
   push:
     branches:
       - main  # This triggers the workflow when there's a commit to the main branch
