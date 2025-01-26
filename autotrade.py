@@ -198,10 +198,10 @@ def background_task():
                     if action in ['buy', 'sell']:
                         result = process_trade(symbol, action)  # Process the trade
                         trades.append({"symbol": symbol, "action": action, "result": result})
-            time.sleep(40)  # Wait 40 seconds before checking again
+            time.sleep(25)  # Wait 40 seconds before checking again
         except Exception as e:
             logging.error(f"Error in background task: {e}")
-            time.sleep(40)  # Wait before retrying if an error occurs
+            time.sleep(25)  # Wait before retrying if an error occurs
 
 # Start the background task in a separate thread
 @app.before_first_request
