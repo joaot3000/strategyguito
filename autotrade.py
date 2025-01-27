@@ -6,10 +6,9 @@ import email
 from email.policy import default
 import logging
 from flask import Flask, jsonify, request
-import threading
 
-# Set up logging configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging configuration to show detailed debug information
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Flask app initialization
 app = Flask(__name__)
@@ -58,73 +57,25 @@ def fetch_alert_emails():
             client.set_flags(msg_id, [r'\Seen'])
         return emails
 
+# Parse the email content to extract action and symbol
 def parse_email(content):
-    logging.info(f"Parsing email content: {content}")  # Log full email content to verify
-
-    # Extract action (buy/sell) and symbol from the alert message content
-    action_match = re.search(r"Action[:\s]*([a-zA-Z]+)", content, re.IGNORECASE)
-    symbol_match = re.search(r"Symbol[:\s]*([A-Za-z0-9]+)", content, re.IGNORECASE)
-
-    if action_match:
-        logging.info(f"Action found: {action_match.group(1)}")
-    else:
-        logging.warning("Action not found in the email.")
-
-    if symbol_match:
-        logging.info(f"Symbol found: {symbol_match.group(1)}")
-    else:
-        logging.warning("Symbol not found in the email.")
-
-    # If both action and symbol are found, return them
+    logging.info(f"Parsing email content: {content}")  # Log email content to verify
+    action_match = re.search(r"Action:\s*(buy|sell)", content, re.IGNORECASE)
+    symbol_match = re.search(r"Symbol:\s*([A-Z]+(?:/[A-Z]+)?)", content, re.IGNORECASE)
+    
     if action_match and symbol_match:
+        logging.info(f"Parsed action: {action_match.group(1)}, symbol: {symbol_match.group(1)}")
         return {
             "action": action_match.group(1).lower(),  # Store the action as "buy" or "sell" (in lowercase)
-            "symbol": symbol_match.group(1).upper()   # Symbol should be uppercase (e.g., BTCUSD)
+            "symbol": symbol_match.group(1).upper()   # Symbol should be uppercase (e.g., BTC/USD)
         }
+    else:
+        logging.warning("No action or symbol found in the email content.")
     return None
 
-def get_existing_position(symbol):
-    """Check if there is an existing position for the given symbol."""
-    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-    try:
-        response = requests.get(endpoint, headers=headers)
-        if response.status_code == 200:
-            return response.json()  # Return the position details if it exists
-        elif response.status_code == 404:
-            return None  # No position exists for this symbol
-        else:
-            logging.error(f"Failed to fetch position for {symbol}. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-        return None
-
-def close_position(symbol):
-    """Close the existing position for the given symbol."""
-    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-    try:
-        response = requests.delete(endpoint, headers=headers)
-        if response.status_code == 200:
-            logging.info(f"Closed position for {symbol}: {response.json()}")
-            return True
-        else:
-            logging.error(f"Failed to close position for {symbol}. Response: {response.text}")
-            return False
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-        return False
-
+# Place a trade (buy/sell) using Alpaca API
 def place_trade(symbol, side, qty=0.014):
-    """Place a new trade (buy or sell)."""
-    endpoint = f"{ALPACA_API_URL}/orders"
+    endpoint = f"https://paper-api.alpaca.markets/v2/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
@@ -158,35 +109,28 @@ def place_trade(symbol, side, qty=0.014):
         logging.error(f"Error during request: {e}")
         return None
 
-def process_trade(symbol, action):
-    """Process a trade by closing the existing position (if any) and placing a new one."""
-    # Check if there is an existing position for the symbol
-    existing_position = get_existing_position(symbol)
-    if existing_position:
-        logging.info(f"Existing position found for {symbol}. Closing it...")
-        if not close_position(symbol):
-            logging.error(f"Failed to close existing position for {symbol}.")
-            return None
-
-    # Place the new trade
-    logging.info(f"Placing new {action} order for {symbol}...")
-    return place_trade(symbol, action)
-
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
     try:
         emails = fetch_alert_emails()
         trades = []
+        logging.info(f"Checking {len(emails)} email(s) for trade signals.")
         for email_content in emails:
             trade_data = parse_email(email_content)
             if trade_data:
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 if action in ['buy', 'sell']:
-                    result = process_trade(symbol, action)  # Process the trade
+                    result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
                     trades.append({"symbol": symbol, "action": action, "result": result})
-        return jsonify({"message": "Email check complete", "trades": trades}), 200
+                else:
+                    logging.warning(f"Invalid action found in email: {action}")
+        if trades:
+            return jsonify({"message": "Trade(s) executed", "trades": trades}), 200
+        else:
+            logging.info("No valid trades found in emails.")
+            return jsonify({"message": "Email check complete, no trades found", "trades": []}), 200
     except Exception as e:
         logging.error(f"Error during trigger: {e}")
         return jsonify({"error": str(e)}), 500
@@ -195,32 +139,6 @@ def trigger_email_check():
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "Service is running"}), 200
-
-# Background task to check for emails and place trades every 40 seconds
-def background_task():
-    while True:
-        try:
-            emails = fetch_alert_emails()
-            trades = []
-            for email_content in emails:
-                trade_data = parse_email(email_content)
-                if trade_data:
-                    action = trade_data["action"]
-                    symbol = trade_data["symbol"]
-                    if action in ['buy', 'sell']:
-                        result = process_trade(symbol, action)  # Process the trade
-                        trades.append({"symbol": symbol, "action": action, "result": result})
-            time.sleep(25)  # Wait 40 seconds before checking again
-        except Exception as e:
-            logging.error(f"Error in background task: {e}")
-            time.sleep(25)  # Wait before retrying if an error occurs
-
-# Start the background task in a separate thread
-@app.before_first_request
-def start_background_task():
-    thread = threading.Thread(target=background_task)
-    thread.daemon = True
-    thread.start()
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
