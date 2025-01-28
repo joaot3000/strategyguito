@@ -7,6 +7,7 @@ from email.policy import default
 import logging
 from flask import Flask, jsonify
 import threading
+import os
 
 # Set up logging configuration to show detailed debug information
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -174,11 +175,14 @@ def home():
     return jsonify({"message": "Service is running"}), 200
 
 if __name__ == "__main__":
+    # Ensure the app binds to the correct dynamic port from the environment
+    port = int(os.environ.get("PORT", 5000))  # Use the PORT environment variable if available
+    logging.info(f"Starting Flask app on port {port}...")
+
     # Start the email checking loop in a background thread
     email_thread = threading.Thread(target=continuous_email_check)
     email_thread.daemon = True  # Ensures the thread stops when the main program exits
     email_thread.start()
 
     # Start the Flask server
-    app.run(host='0.0.0.0', port=5000)
-
+    app.run(host='0.0.0.0', port=port)
