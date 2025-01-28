@@ -140,7 +140,7 @@ def place_trade(symbol, side, qty=0.014):
         "qty": qty,
         "side": side,  # Ensure it's in lowercase
         "type": "market",
-        "time_in_force": "gtc"
+        "time_in_force": "day"
     }
 
     try:
