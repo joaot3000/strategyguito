@@ -5,7 +5,8 @@ from imapclient import IMAPClient
 import email
 from email.policy import default
 import logging
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
+import threading
 
 # Set up logging configuration to show detailed debug information
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -113,7 +114,32 @@ def place_trade(symbol, side, qty=0.014):
         logging.error(f"Error during request: {e}")
         return None
 
-# Flask route to trigger email checking and trade placement
+# Function to continuously check for new emails
+def continuous_email_check():
+    while True:
+        logging.info("Starting email check loop...")
+        emails = fetch_alert_emails()
+        trades = []
+        logging.info(f"Checking {len(emails)} email(s) for trade signals.")
+        for email_content in emails:
+            trade_data = parse_email(email_content)
+            if trade_data:
+                action = trade_data["action"]
+                symbol = trade_data["symbol"]
+                if action in ['buy', 'sell']:
+                    result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
+                    trades.append({"symbol": symbol, "action": action, "result": result})
+                else:
+                    logging.warning(f"Invalid action found in email: {action}")
+        if trades:
+            logging.info(f"Trade(s) executed: {trades}")
+        else:
+            logging.info("No valid trades found in emails.")
+        
+        # Wait for 60 seconds before checking for new emails
+        time.sleep(60)
+
+# Flask route to trigger email checking and trade placement manually
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
     try:
@@ -145,5 +171,10 @@ def home():
     return jsonify({"message": "Service is running"}), 200
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    # Start the email checking loop in a background thread
+    email_thread = threading.Thread(target=continuous_email_check)
+    email_thread.daemon = True  # Ensures the thread stops when the main program exits
+    email_thread.start()
 
+    # Start the Flask server
+    app.run(host='0.0.0.0', port=5000)
