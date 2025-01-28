@@ -105,22 +105,30 @@ def get_existing_position(symbol):
 
 def close_position(symbol):
     """Close the existing position for the given symbol."""
-    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
+    position_url = f"{ALPACA_API_URL}/positions/{symbol}"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
     }
-    try:
-        response = requests.delete(endpoint, headers=headers)
-        if response.status_code == 200:
-            logging.info(f"Closed position for {symbol}: {response.json()}")
-            return True
-        else:
-            logging.error(f"Failed to close position for {symbol}. Response: {response.text}")
-            return False
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-        return False
+
+    response = requests.get(position_url, headers=headers)
+    
+    if response.status_code == 200:
+        position = response.json()
+        qty = float(position["qty"])  # How much you own
+
+        if qty > 0:  # If holding a long position
+            close_order = {
+                "symbol": symbol,
+                "qty": qty,  # Sell all of it
+                "side": "sell",
+                "type": "market",
+                "time_in_force": "day"
+            }
+            sell_response = requests.post(f"{ALPACA_API_URL}/orders", json=close_order, headers=headers)
+            return sell_response.json() if sell_response.status_code == 200 else None
+
+    return None  # No position to close
 
 def place_trade(symbol, side, qty=0.014):
     """Place a new trade (buy or sell)."""
@@ -168,7 +176,18 @@ def process_trade(symbol, action):
             logging.error(f"Failed to close existing position for {symbol}.")
             return None
 
-    # Place the new trade
+    # Handle "sell" action by closing the position instead of shorting
+    if action == "sell":
+        available_qty = float(existing_position["qty"]) if existing_position else 0
+        if available_qty > 0:
+            logging.info(f"Closing long position of {available_qty} {symbol} instead of shorting.")
+            result = close_position(symbol)  # Close the position instead of shorting
+            return result
+        else:
+            logging.warning(f"Skipping short trade for {symbol} because no long position exists.")
+            return None
+
+    # Place the new trade for "buy" action
     logging.info(f"Placing new {action} order for {symbol}...")
     return place_trade(symbol, action)
 
@@ -210,7 +229,7 @@ def background_task():
                     if action in ['buy', 'sell']:
                         result = process_trade(symbol, action)  # Process the trade
                         trades.append({"symbol": symbol, "action": action, "result": result})
-            time.sleep(25)  # Wait 40 seconds before checking again
+            time.sleep(25)  # Wait 25 seconds before checking again
         except Exception as e:
             logging.error(f"Error in background task: {e}")
             time.sleep(25)  # Wait before retrying if an error occurs
