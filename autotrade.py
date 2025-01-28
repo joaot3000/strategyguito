@@ -115,6 +115,7 @@ def place_trade(symbol, side, qty=0.014):
 
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
+d@app.route('/trigger', methods=['GET'])
 def trigger_email_check():
     try:
         emails = fetch_alert_emails()
