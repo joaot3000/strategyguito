@@ -25,43 +25,47 @@ IMAP_SERVER = "imap.gmail.com"  # e.g., imap.gmail.com
 
 # Function to connect to your email and fetch unread emails
 def fetch_alert_emails():
-    logging.info('Connecting to email server...')
-    with IMAPClient(IMAP_SERVER) as client:
-        client.login(EMAIL, PASSWORD)
-        client.select_folder("INBOX")
-        logging.info('Searching for unread emails...')
-        messages = client.search([
-            "UNSEEN",
-            "FROM", "noreply@tradingview.com",
-            "SUBJECT", "guito"  # Replace with your actual subject line
-        ])
-        emails = []
-        logging.info(f'Found {len(messages)} unread emails.')
-        for msg_id, data in client.fetch(messages, "RFC822").items():
-            msg = email.message_from_bytes(data[b"RFC822"], policy=default)
-            email_content = None
-            if msg.is_multipart():
-                for part in msg.iter_parts():
-                    logging.info(f'Part content type: {part.get_content_type()}')
-                    if part.get_content_type() in ["text/plain", "text/html"]:
-                        email_content = part.get_payload(decode=True).decode('utf-8')
-                        logging.info(f'Fetched email part: {email_content}')
-                        break
-            else:
-                if msg.get_content_type() in ["text/plain", "text/html"]:
-                    email_content = msg.get_payload(decode=True).decode('utf-8')
-                    logging.info(f'Fetched email content: {email_content}')
-            if email_content:
-                emails.append(email_content)
-                logging.info('Fetched email content.')
-            client.set_flags(msg_id, [r'\Seen'])
-        return emails
+    try:
+        logging.info('Connecting to email server...')
+        with IMAPClient(IMAP_SERVER) as client:
+            client.login(EMAIL, PASSWORD)
+            client.select_folder("INBOX")
+            logging.info('Searching for unread emails...')
+            messages = client.search([
+                "UNSEEN",
+                "FROM", "noreply@tradingview.com",
+                "SUBJECT", "guito"  # Replace with your actual subject line
+            ])
+            emails = []
+            logging.info(f'Found {len(messages)} unread emails.')
+            for msg_id, data in client.fetch(messages, "RFC822").items():
+                msg = email.message_from_bytes(data[b"RFC822"], policy=default)
+                email_content = None
+                if msg.is_multipart():
+                    for part in msg.iter_parts():
+                        logging.debug(f'Part content type: {part.get_content_type()}')
+                        if part.get_content_type() in ["text/plain", "text/html"]:
+                            email_content = part.get_payload(decode=True).decode('utf-8')
+                            logging.debug(f'Fetched email part: {email_content}')
+                            break
+                else:
+                    if msg.get_content_type() in ["text/plain", "text/html"]:
+                        email_content = msg.get_payload(decode=True).decode('utf-8')
+                        logging.debug(f'Fetched email content: {email_content}')
+                if email_content:
+                    emails.append(email_content)
+                    logging.info('Fetched email content.')
+                client.set_flags(msg_id, [r'\Seen'])
+            return emails
+    except Exception as e:
+        logging.error(f"Failed to fetch emails: {e}")
+        return []
 
 # Parse the email content to extract action and symbol
 def parse_email(content):
-    logging.info(f"Parsing email content: {content}")  # Log email content to verify
-    action_match = re.search(r"Action:\s*(buy|sell)", content, re.IGNORECASE)
-    symbol_match = re.search(r"Symbol:\s*([A-Z]+(?:/[A-Z]+)?)", content, re.IGNORECASE)
+    logging.debug(f"Parsing email content: {content}")  # Log email content to verify
+    action_match = re.search(r"Action[:\s]*(buy|sell)", content, re.IGNORECASE)
+    symbol_match = re.search(r"Symbol[:\s]*([A-Za-z0-9/-]+)", content, re.IGNORECASE)
     
     if action_match and symbol_match:
         logging.info(f"Parsed action: {action_match.group(1)}, symbol: {symbol_match.group(1)}")
@@ -75,7 +79,7 @@ def parse_email(content):
 
 # Place a trade (buy/sell) using Alpaca API
 def place_trade(symbol, side, qty=0.014):
-    endpoint = f"https://paper-api.alpaca.markets/v2/orders"
+    endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
