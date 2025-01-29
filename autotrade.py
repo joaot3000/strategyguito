@@ -4,6 +4,7 @@ import logging
 from flask import Flask, jsonify
 from ib_insync import IB, Stock, MarketOrder
 import threading 
+import os
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
