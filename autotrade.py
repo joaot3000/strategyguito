@@ -111,61 +111,90 @@ def close_position(symbol):
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
     }
 
-    response = requests.get(position_url, headers=headers)
-    
-    if response.status_code == 200:
-        position = response.json()
-        qty = float(position["qty"])  # How much you own
+    try:
+        response = requests.get(position_url, headers=headers)
 
-        if qty > 0:  # If holding a long position
+        if response.status_code == 200:
+            position = response.json()
+            if "qty" not in position:
+                logging.warning(f"No position found for {symbol}.")
+                return None  # No position exists
+
+            qty = float(position["qty"])
+            side = "sell" if qty > 0 else "buy"  # Sell long positions, buy to close short
+
             close_order = {
                 "symbol": symbol,
-                "qty": qty,  # Sell all of it
-                "side": "sell",
+                "qty": abs(qty),  # Always use absolute qty
+                "side": side,  # Correct closing action
                 "type": "market",
                 "time_in_force": "day"
             }
+
             sell_response = requests.post(f"{ALPACA_API_URL}/orders", json=close_order, headers=headers)
-            return sell_response.json() if sell_response.status_code == 200 else None
+            
+            if sell_response.status_code == 200:
+                logging.info(f"Closed position for {symbol}: {sell_response.json()}")
+                return sell_response.json()
+            else:
+                logging.error(f"Failed to close position. Response: {sell_response.text}")
+                return None
+        elif response.status_code == 404:
+            logging.info(f"No existing position for {symbol}. Nothing to close.")
+            return None  # No position exists
+        else:
+            logging.error(f"Failed to fetch position for {symbol}. Response: {response.text}")
+            return None
 
-    return None  # No position to close
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error during request: {e}")
+        return None
 
-def place_trade(symbol, side, qty=0.014):
-    """Place a new trade (buy or sell)."""
+def place_trade(symbol, side, notional=20):
+    """Place a new trade using a dollar amount instead of quantity if the asset is not fractionable."""
     endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
     }
 
-    # Ensure the side is either "buy" or "sell"
+    # Ensure the side is valid
     if side.lower() not in ["buy", "sell"]:
-        logging.error(f"Invalid side: {side}")
+        logging.error(f"Invalid trade side: {side}")
         return None
+
+    # Check if the asset supports fractional trading
+    asset_info = get_asset_info(symbol)
+    if not asset_info:
+        logging.error(f"Could not retrieve asset info for {symbol}.")
+        return None
+
+    fractionable = asset_info.get("fractionable", False)  # Default to False if key is missing
 
     order = {
         "symbol": symbol,
-        "qty": qty,
-        "side": side,  # Ensure it's in lowercase
+        "side": side,
         "type": "market",
         "time_in_force": "day"
     }
 
-    try:
-        # Send the POST request to place the order
-        response = requests.post(endpoint, json=order, headers=headers)
+    if fractionable:
+        order["qty"] = 0.014  # Use fractional qty if supported
+    else:
+        order["notional"] = notional  # Use dollar-based order if fractioning is not allowed
 
-        # Check the HTTP status code
+    try:
+        response = requests.post(endpoint, json=order, headers=headers)
         if response.status_code == 200:
             logging.info(f"Order placed successfully: {response.json()}")
-            return response.json()  # This should work if the response is valid JSON
+            return response.json()
         else:
             logging.error(f"Failed to place order. Response: {response.text}")
             return None
     except requests.exceptions.RequestException as e:
         logging.error(f"Error during request: {e}")
         return None
-
+        
 def process_trade(symbol, action):
     """Process a trade by closing the existing position (if any) and placing a new one."""
     # Check if there is an existing position for the symbol
