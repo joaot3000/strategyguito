@@ -196,6 +196,9 @@ def background_task():
             logging.error(f"Error in background task: {e}")
             time.sleep(25)  # Retry after 25 seconds if an error occurs
 
+@app.route('/')
+def home():
+    return "Welcome to the trading API!"  # Or any message you want
 
 # Start the background task in a separate thread
 if __name__ == "__main__":
