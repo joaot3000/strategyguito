@@ -208,4 +208,4 @@ if __name__ == "__main__":
     thread.start()  # Start background task in the background thread
     
     # Now run Flask app
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
