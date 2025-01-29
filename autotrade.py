@@ -1,12 +1,9 @@
 import time
 import re
-import requests
-from imapclient import IMAPClient
-import email
-from email.policy import default
 import logging
-from flask import Flask, jsonify, request
-import threading
+from flask import Flask, jsonify
+from ib_insync import IB, Stock, MarketOrder
+import threading 
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,54 +11,49 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Flask app initialization
 app = Flask(__name__)
 
-# Alpaca API credentials
-ALPACA_API_URL = "https://paper-api.alpaca.markets/v2"
-ALPACA_API_KEY = "PKCCAHDTUSPTYNMRQBA2"
-ALPACA_SECRET_KEY = "Peh8XoPBwmgrxxfPvGKO5F8SnfHZt6lVsybUJ8qy"
+# IBKR API credentials and settings
+IBKR_HOST = '127.0.0.1'
+IBKR_PORT = 7497  # Default for paper trading
+IBKR_CLIENT_ID = 1  # Set an appropriate client ID
 
 # Email credentials
 EMAIL = "jtmendescb@gmail.com"
 PASSWORD = "pkdj ptea aioo wqfy"
-IMAP_SERVER = "imap.gmail.com"  # e.g., imap.gmail.com
+IMAP_SERVER = "imap.gmail.com"
+
+# IBKR Connection Setup
+ib = IB()
+
+def connect_ibkr():
+    """Connect to IBKR API (IB Gateway or TWS)."""
+    try:
+        ib.connect(IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID)
+        logging.info("Connected to IBKR API")
+    except Exception as e:
+        logging.error(f"Error connecting to IBKR API: {e}")
+
+def disconnect_ibkr():
+    """Disconnect from IBKR API."""
+    if ib.isConnected():
+        ib.disconnect()
+        logging.info("Disconnected from IBKR API")
 
 # Function to connect to your email and fetch unread emails
 def fetch_alert_emails():
     logging.info('Connecting to email server...')
-    with IMAPClient(IMAP_SERVER) as client:
-        client.login(EMAIL, PASSWORD)
-        client.select_folder("INBOX")
-        logging.info('Searching for unread emails...')
-        messages = client.search([
-            "UNSEEN",
-            "FROM", "noreply@tradingview.com",
-            "SUBJECT", "guito"  # Replace with your actual subject line
-        ])
-        emails = []
-        logging.info(f'Found {len(messages)} unread emails.')
-        for msg_id, data in client.fetch(messages, "RFC822").items():
-            msg = email.message_from_bytes(data[b"RFC822"], policy=default)
-            email_content = None
-            if msg.is_multipart():
-                for part in msg.iter_parts():
-                    logging.info(f'Part content type: {part.get_content_type()}')
-                    if part.get_content_type() in ["text/plain", "text/html"]:
-                        email_content = part.get_payload(decode=True).decode('utf-8')
-                        logging.info(f'Fetched email part: {email_content}')
-                        break
-            else:
-                if msg.get_content_type() in ["text/plain", "text/html"]:
-                    email_content = msg.get_payload(decode=True).decode('utf-8')
-                    logging.info(f'Fetched email content: {email_content}')
-            if email_content:
-                emails.append(email_content)
-                logging.info('Fetched email content.')
-            client.set_flags(msg_id, [r'\Seen'])
+    try:
+        # Your existing email fetching logic here
+        # For example, if using IMAP:
+        # Assuming emails = some_imap_client.fetch_emails()
+        emails = []  # If no emails found or an error occurs, return an empty list
         return emails
+    except Exception as e:
+        logging.error(f"Error fetching emails: {e}")
+        return []  # Return an empty list on error instead of None
 
 def parse_email(content):
-    logging.info(f"Parsing email content: {content}")  # Log full email content to verify
-
-    # Extract action (buy/sell) and symbol from the alert message content
+    """Parse email content to extract trading instructions."""
+    logging.info(f"Parsing email content: {content}")
     action_match = re.search(r"Action[:\s]*([a-zA-Z]+)", content, re.IGNORECASE)
     symbol_match = re.search(r"Symbol[:\s]*([A-Za-z0-9]+)", content, re.IGNORECASE)
 
@@ -75,148 +67,80 @@ def parse_email(content):
     else:
         logging.warning("Symbol not found in the email.")
 
-    # If both action and symbol are found, return them
     if action_match and symbol_match:
         return {
-            "action": action_match.group(1).lower(),  # Store the action as "buy" or "sell" (in lowercase)
-            "symbol": symbol_match.group(1).upper()   # Symbol should be uppercase (e.g., BTCUSD)
+            "action": action_match.group(1).lower(),
+            "symbol": symbol_match.group(1).upper()
         }
     return None
 
 def get_existing_position(symbol):
     """Check if there is an existing position for the given symbol."""
-    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
     try:
-        response = requests.get(endpoint, headers=headers)
-        if response.status_code == 200:
-            return response.json()  # Return the position details if it exists
-        elif response.status_code == 404:
-            return None  # No position exists for this symbol
-        else:
-            logging.error(f"Failed to fetch position for {symbol}. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
+        positions = ib.positions()
+        for position in positions:
+            if position.contract.symbol == symbol:
+                return position
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching position for {symbol}: {e}")
         return None
 
 def close_position(symbol):
     """Close the existing position for the given symbol."""
-    position_url = f"{ALPACA_API_URL}/positions/{symbol}"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-
     try:
-        response = requests.get(position_url, headers=headers)
-
-        if response.status_code == 200:
-            position = response.json()
-            if "qty" not in position:
-                logging.warning(f"No position found for {symbol}.")
-                return None  # No position exists
-
-            qty = float(position["qty"])
-            side = "sell" if qty > 0 else "buy"  # Sell long positions, buy to close short
-
-            close_order = {
-                "symbol": symbol,
-                "qty": abs(qty),  # Always use absolute qty
-                "side": side,  # Correct closing action
-                "type": "market",
-                "time_in_force": "day"
-            }
-
-            sell_response = requests.post(f"{ALPACA_API_URL}/orders", json=close_order, headers=headers)
+        position = get_existing_position(symbol)
+        if position:
+            logging.info(f"Existing position found for {symbol}. Closing it...")
             
-            if sell_response.status_code == 200:
-                logging.info(f"Closed position for {symbol}: {sell_response.json()}")
-                return sell_response.json()
-            else:
-                logging.error(f"Failed to close position. Response: {sell_response.text}")
-                return None
-        elif response.status_code == 404:
+            if position.position > 0:
+                # Long position: Sell to close
+                order = MarketOrder('SELL', position.position)
+            elif position.position < 0:
+                # Short position: Buy to cover
+                order = MarketOrder('BUY', abs(position.position))  # Buy to cover the short position
+
+            trade = ib.placeOrder(position.contract, order)
+            trade.wait()  # Wait until the trade is completed
+            logging.info(f"Position closed for {symbol}.")
+            return trade
+        else:
             logging.info(f"No existing position for {symbol}. Nothing to close.")
-            return None  # No position exists
-        else:
-            logging.error(f"Failed to fetch position for {symbol}. Response: {response.text}")
             return None
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
+    except Exception as e:
+        logging.error(f"Error closing position for {symbol}: {e}")
         return None
 
-def place_trade(symbol, side, notional=20):
+
+def place_trade(symbol, action, notional=20):
     """Place a new trade using a dollar amount instead of quantity if the asset is not fractionable."""
-    endpoint = f"{ALPACA_API_URL}/orders"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-
-    # Ensure the side is valid
-    if side.lower() not in ["buy", "sell"]:
-        logging.error(f"Invalid trade side: {side}")
-        return None
-
-    # Check if the asset supports fractional trading
-    asset_info = get_asset_info(symbol)
-    if not asset_info:
-        logging.error(f"Could not retrieve asset info for {symbol}.")
-        return None
-
-    fractionable = asset_info.get("fractionable", False)  # Default to False if key is missing
-
-    order = {
-        "symbol": symbol,
-        "side": side,
-        "type": "market",
-        "time_in_force": "day"
-    }
-
-    if fractionable:
-        order["qty"] = 0.014  # Use fractional qty if supported
-    else:
-        order["notional"] = notional  # Use dollar-based order if fractioning is not allowed
-
     try:
-        response = requests.post(endpoint, json=order, headers=headers)
-        if response.status_code == 200:
-            logging.info(f"Order placed successfully: {response.json()}")
-            return response.json()
+        contract = Stock(symbol, 'SMART', 'USD')
+        if action == 'buy':
+            order = MarketOrder('BUY', notional)  # Market buy order
+        elif action == 'sell':
+            order = MarketOrder('SELL', notional)  # Market sell order
         else:
-            logging.error(f"Failed to place order. Response: {response.text}")
+            logging.error(f"Invalid action: {action}")
             return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
+        trade = ib.placeOrder(contract, order)
+        trade.wait()  # Wait until the trade is completed
+        logging.info(f"Trade placed: {action} {notional} of {symbol}")
+        return trade
+    except Exception as e:
+        logging.error(f"Error placing trade for {symbol}: {e}")
         return None
-        
+
 def process_trade(symbol, action):
     """Process a trade by closing the existing position (if any) and placing a new one."""
-    # Check if there is an existing position for the symbol
     existing_position = get_existing_position(symbol)
+    
+    # Close any existing position
     if existing_position:
         logging.info(f"Existing position found for {symbol}. Closing it...")
-        if not close_position(symbol):
-            logging.error(f"Failed to close existing position for {symbol}.")
-            return None
-
-    # Handle "sell" action by closing the position instead of shorting
-    if action == "sell":
-        available_qty = float(existing_position["qty"]) if existing_position else 0
-        if available_qty > 0:
-            logging.info(f"Closing long position of {available_qty} {symbol} instead of shorting.")
-            result = close_position(symbol)  # Close the position instead of shorting
-            return result
-        else:
-            logging.warning(f"Skipping short trade for {symbol} because no long position exists.")
-            return None
-
-    # Place the new trade for "buy" action
+        close_position(symbol)
+    
+    # Place the new trade (buy/sell)
     logging.info(f"Placing new {action} order for {symbol}...")
     return place_trade(symbol, action)
 
@@ -232,7 +156,7 @@ def trigger_email_check():
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 if action in ['buy', 'sell']:
-                    result = process_trade(symbol, action)  # Process the trade
+                    result = process_trade(symbol, action)  # Process the trade (close old, place new)
                     trades.append({"symbol": symbol, "action": action, "result": result})
         return jsonify({"message": "Email check complete", "trades": trades}), 200
     except Exception as e:
@@ -248,7 +172,13 @@ def health_check():
 def background_task():
     while True:
         try:
-            emails = fetch_alert_emails()
+            emails = fetch_alert_emails()  # Fetch the emails
+            
+            # Handle case if emails is None or empty list
+            if not emails:
+                logging.warning("No emails fetched or error in fetching emails.")
+                emails = []  # Set to empty list if None or empty
+            
             trades = []
             for email_content in emails:
                 trade_data = parse_email(email_content)
@@ -256,19 +186,23 @@ def background_task():
                     action = trade_data["action"]
                     symbol = trade_data["symbol"]
                     if action in ['buy', 'sell']:
-                        result = process_trade(symbol, action)  # Process the trade
+                        result = process_trade(symbol, action)  # Process the trade (close old, place new)
                         trades.append({"symbol": symbol, "action": action, "result": result})
-            time.sleep(25)  # Wait 25 seconds before checking again
+            
+            # Sleep before checking emails again
+            time.sleep(25)
+        
         except Exception as e:
             logging.error(f"Error in background task: {e}")
-            time.sleep(25)  # Wait before retrying if an error occurs
+            time.sleep(25)  # Retry after 25 seconds if an error occurs
+
 
 # Start the background task in a separate thread
-@app.before_first_request
-def start_background_task():
+if __name__ == "__main__":
+    connect_ibkr()  # Connect to IBKR API
     thread = threading.Thread(target=background_task)
     thread.daemon = True
-    thread.start()
-
-if __name__ == "__main__":
+    thread.start()  # Start background task in the background thread
+    
+    # Now run Flask app
     app.run(host='0.0.0.0', port=5000)
