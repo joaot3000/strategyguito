@@ -5,4 +5,4 @@ ib_insync==0.9.74
 Flask==2.3.2
 flask-cors==5.0.0
 python-dotenv==0.21.0
-email==6.0.0
+email==6.0.0a1
