@@ -5,6 +5,9 @@ from flask import Flask, jsonify
 from ib_insync import IB, Stock, MarketOrder
 import threading 
 import os
+import imaplib
+import email
+from email.header import decode_header
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,8 +21,8 @@ IBKR_PORT = 7497  # Default for paper trading
 IBKR_CLIENT_ID = 1  # Set an appropriate client ID
 
 # Email credentials
-EMAIL = "jtmendescb@gmail.com"
-PASSWORD = "pkdj ptea aioo wqfy"
+EMAIL = os.getenv('EMAIL', "jtmendescb@gmail.com")
+PASSWORD = os.getenv('PASSWORD', "pkdj ptea aioo wqfy")  # Make sure this is safely managed
 IMAP_SERVER = "imap.gmail.com"
 
 # IBKR Connection Setup
@@ -43,14 +46,63 @@ def disconnect_ibkr():
 def fetch_alert_emails():
     logging.info('Connecting to email server...')
     try:
-        # Your existing email fetching logic here
-        # For example, if using IMAP:
-        # Assuming emails = some_imap_client.fetch_emails()
-        emails = []  # If no emails found or an error occurs, return an empty list
+        # Connect to Gmail's IMAP server
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+        mail.login(EMAIL, PASSWORD)
+        
+        # Select the mailbox you want to check (INBOX)
+        mail.select("inbox")
+        
+        # Search for all unread emails (UNSEEN)
+        status, messages = mail.search(None, 'UNSEEN')
+        
+        if status != "OK":
+            logging.warning("No unread emails found.")
+            return []
+        
+        emails = []
+        
+        for msg_num in messages[0].split():
+            # Fetch the email by its ID
+            status, msg_data = mail.fetch(msg_num, "(RFC822)")
+            
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    # Decode the email subject
+                    subject, encoding = decode_header(msg["Subject"])[0]
+                    if isinstance(subject, bytes):
+                        subject = subject.decode(encoding if encoding else 'utf-8')
+                    
+                    # Get the email sender
+                    from_ = msg.get("From")
+                    
+                    # Fetch the email content
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            # Get the content type of the email
+                            content_type = part.get_content_type()
+                            content_disposition = str(part.get("Content-Disposition"))
+                            
+                            # If the email part is text/plain or text/html
+                            if content_type == "text/plain" and "attachment" not in content_disposition:
+                                body = part.get_payload(decode=True).decode()
+                                emails.append(body)
+                    else:
+                        body = msg.get_payload(decode=True).decode()
+                        emails.append(body)
+        
+        # Mark the email as read after fetching
+        mail.store('1:*', '+FLAGS', '\\Seen')
+        
+        # Close and logout
+        mail.close()
+        mail.logout()
+
         return emails
     except Exception as e:
         logging.error(f"Error fetching emails: {e}")
-        return []  # Return an empty list on error instead of None
+        return []
 
 def parse_email(content):
     """Parse email content to extract trading instructions."""
