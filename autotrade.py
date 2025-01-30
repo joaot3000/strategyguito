@@ -147,22 +147,8 @@ def process_trade(symbol, action):
 
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
-def trigger_email_check():
-    try:
-        emails = fetch_alert_emails()
-        trades = []
-        for email_content in emails:
-            trade_data = parse_email(email_content)
-            if trade_data:
-                action = trade_data["action"]
-                symbol = trade_data["symbol"]
-                if action in ['buy', 'sell']:
-                    result = process_trade(symbol, action)  # Process the trade (close old, place new)
-                    trades.append({"symbol": symbol, "action": action, "result": result})
-        return jsonify({"message": "Email check complete", "trades": trades}), 200
-    except Exception as e:
-        logging.error(f"Error during trigger: {e}")
-        return jsonify({"error": str(e)}), 500
+def test_trigger():
+    return jsonify({"message": "Trigger route is working"}), 200
 
 # Flask route to check if the service is running
 @app.route('/health', methods=['GET'])
