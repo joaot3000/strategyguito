@@ -7,11 +7,7 @@ import threading
 import os
 
 # Set up logging configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]  # Ensure logs go to the console
-)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Flask app initialization
 app = Flask(__name__)
@@ -48,6 +44,8 @@ def fetch_alert_emails():
     logging.info('Connecting to email server...')
     try:
         # Your existing email fetching logic here
+        # For example, if using IMAP:
+        # emails = imap.fetch_unread_emails()  # (Replace with your IMAP logic)
         emails = []  # If no emails found or an error occurs, return an empty list
         logging.info(f"Fetched {len(emails)} emails.")
         return emails
@@ -84,9 +82,7 @@ def get_existing_position(symbol):
         positions = ib.positions()
         for position in positions:
             if position.contract.symbol == symbol:
-                logging.info(f"Existing position found for {symbol}.")
                 return position
-        logging.info(f"No existing position found for {symbol}.")
         return None
     except Exception as e:
         logging.error(f"Error fetching position for {symbol}: {e}")
@@ -97,7 +93,8 @@ def close_position(symbol):
     try:
         position = get_existing_position(symbol)
         if position:
-            logging.info(f"Closing position for {symbol}.")
+            logging.info(f"Existing position found for {symbol}. Closing it...")
+            
             if position.position > 0:
                 # Long position: Sell to close
                 order = MarketOrder('SELL', position.position)
@@ -115,7 +112,6 @@ def close_position(symbol):
     except Exception as e:
         logging.error(f"Error closing position for {symbol}: {e}")
         return None
-
 
 def place_trade(symbol, action, notional=20):
     """Place a new trade using a dollar amount instead of quantity if the asset is not fractionable."""
@@ -138,6 +134,7 @@ def place_trade(symbol, action, notional=20):
 
 def process_trade(symbol, action):
     """Process a trade by closing the existing position (if any) and placing a new one."""
+    logging.info(f"Processing trade for {symbol} - {action}")
     existing_position = get_existing_position(symbol)
     
     # Close any existing position
@@ -151,28 +148,14 @@ def process_trade(symbol, action):
 
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
-def trigger_email_check():
-    logging.info("Triggered email check.")
-    try:
-        emails = fetch_alert_emails()
-        trades = []
-        for email_content in emails:
-            trade_data = parse_email(email_content)
-            if trade_data:
-                action = trade_data["action"]
-                symbol = trade_data["symbol"]
-                if action in ['buy', 'sell']:
-                    result = process_trade(symbol, action)  # Process the trade (close old, place new)
-                    trades.append({"symbol": symbol, "action": action, "result": result})
-        return jsonify({"message": "Email check complete", "trades": trades}), 200
-    except Exception as e:
-        logging.error(f"Error during trigger: {e}")
-        return jsonify({"error": str(e)}), 500
+def test_trigger():
+    logging.info("Trigger route accessed.")
+    return jsonify({"message": "Trigger route is working"}), 200
 
 # Flask route to check if the service is running
 @app.route('/health', methods=['GET'])
 def health_check():
-    logging.info("Health check accessed.")
+    logging.info("Health check route accessed.")
     return jsonify({"status": "Service is running"}), 200
 
 # Background task to check for emails and place trades every 40 seconds
@@ -180,10 +163,8 @@ def background_task():
     logging.info("Background task started.")
     while True:
         try:
-            logging.info("Fetching emails...")
+            logging.info("Checking for new emails...")
             emails = fetch_alert_emails()  # Fetch the emails
-            
-            # Handle case if emails is None or empty list
             if not emails:
                 logging.warning("No emails fetched or error in fetching emails.")
                 emails = []  # Set to empty list if None or empty
@@ -212,12 +193,14 @@ def home():
 
 # Start the background task in a separate thread
 if __name__ == "__main__":
+    logging.info("Starting Flask app and background task.")
     connect_ibkr()  # Connect to IBKR API
     thread = threading.Thread(target=background_task)
-    thread.daemon = True  # Make sure the background task exits when the main program exits
-    thread.start()  # Start background task in a separate thread
-
-    # Run Flask app
+    thread.daemon = True
+    thread.start()  # Start background task in the background thread
+    
+    # Start Flask app
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)
+    logging.info(f"Running Flask app on port {port}.")
+    app.run(host="0.0.0.0", port=port)
 
