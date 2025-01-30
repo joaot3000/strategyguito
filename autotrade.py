@@ -5,12 +5,13 @@ from flask import Flask, jsonify
 from ib_insync import IB, Stock, MarketOrder
 import threading 
 import os
-import imaplib
-import email
-from email.header import decode_header
 
 # Set up logging configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]  # Ensure logs go to the console
+)
 
 # Flask app initialization
 app = Flask(__name__)
@@ -21,8 +22,8 @@ IBKR_PORT = 7497  # Default for paper trading
 IBKR_CLIENT_ID = 1  # Set an appropriate client ID
 
 # Email credentials
-EMAIL = os.getenv('EMAIL', "jtmendescb@gmail.com")
-PASSWORD = os.getenv('PASSWORD', "pkdj ptea aioo wqfy")  # Make sure this is safely managed
+EMAIL = "jtmendescb@gmail.com"
+PASSWORD = "pkdj ptea aioo wqfy"
 IMAP_SERVER = "imap.gmail.com"
 
 # IBKR Connection Setup
@@ -46,63 +47,13 @@ def disconnect_ibkr():
 def fetch_alert_emails():
     logging.info('Connecting to email server...')
     try:
-        # Connect to Gmail's IMAP server
-        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
-        mail.login(EMAIL, PASSWORD)
-        
-        # Select the mailbox you want to check (INBOX)
-        mail.select("inbox")
-        
-        # Search for all unread emails (UNSEEN)
-        status, messages = mail.search(None, 'UNSEEN')
-        
-        if status != "OK":
-            logging.warning("No unread emails found.")
-            return []
-        
-        emails = []
-        
-        for msg_num in messages[0].split():
-            # Fetch the email by its ID
-            status, msg_data = mail.fetch(msg_num, "(RFC822)")
-            
-            for response_part in msg_data:
-                if isinstance(response_part, tuple):
-                    msg = email.message_from_bytes(response_part[1])
-                    # Decode the email subject
-                    subject, encoding = decode_header(msg["Subject"])[0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode(encoding if encoding else 'utf-8')
-                    
-                    # Get the email sender
-                    from_ = msg.get("From")
-                    
-                    # Fetch the email content
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            # Get the content type of the email
-                            content_type = part.get_content_type()
-                            content_disposition = str(part.get("Content-Disposition"))
-                            
-                            # If the email part is text/plain or text/html
-                            if content_type == "text/plain" and "attachment" not in content_disposition:
-                                body = part.get_payload(decode=True).decode()
-                                emails.append(body)
-                    else:
-                        body = msg.get_payload(decode=True).decode()
-                        emails.append(body)
-        
-        # Mark the email as read after fetching
-        mail.store('1:*', '+FLAGS', '\\Seen')
-        
-        # Close and logout
-        mail.close()
-        mail.logout()
-
+        # Your existing email fetching logic here
+        emails = []  # If no emails found or an error occurs, return an empty list
+        logging.info(f"Fetched {len(emails)} emails.")
         return emails
     except Exception as e:
         logging.error(f"Error fetching emails: {e}")
-        return []
+        return []  # Return an empty list on error instead of None
 
 def parse_email(content):
     """Parse email content to extract trading instructions."""
@@ -133,7 +84,9 @@ def get_existing_position(symbol):
         positions = ib.positions()
         for position in positions:
             if position.contract.symbol == symbol:
+                logging.info(f"Existing position found for {symbol}.")
                 return position
+        logging.info(f"No existing position found for {symbol}.")
         return None
     except Exception as e:
         logging.error(f"Error fetching position for {symbol}: {e}")
@@ -144,8 +97,7 @@ def close_position(symbol):
     try:
         position = get_existing_position(symbol)
         if position:
-            logging.info(f"Existing position found for {symbol}. Closing it...")
-            
+            logging.info(f"Closing position for {symbol}.")
             if position.position > 0:
                 # Long position: Sell to close
                 order = MarketOrder('SELL', position.position)
@@ -199,18 +151,36 @@ def process_trade(symbol, action):
 
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
-def test_trigger():
-    return jsonify({"message": "Trigger route is working"}), 200
+def trigger_email_check():
+    logging.info("Triggered email check.")
+    try:
+        emails = fetch_alert_emails()
+        trades = []
+        for email_content in emails:
+            trade_data = parse_email(email_content)
+            if trade_data:
+                action = trade_data["action"]
+                symbol = trade_data["symbol"]
+                if action in ['buy', 'sell']:
+                    result = process_trade(symbol, action)  # Process the trade (close old, place new)
+                    trades.append({"symbol": symbol, "action": action, "result": result})
+        return jsonify({"message": "Email check complete", "trades": trades}), 200
+    except Exception as e:
+        logging.error(f"Error during trigger: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # Flask route to check if the service is running
 @app.route('/health', methods=['GET'])
 def health_check():
+    logging.info("Health check accessed.")
     return jsonify({"status": "Service is running"}), 200
 
 # Background task to check for emails and place trades every 40 seconds
 def background_task():
+    logging.info("Background task started.")
     while True:
         try:
+            logging.info("Fetching emails...")
             emails = fetch_alert_emails()  # Fetch the emails
             
             # Handle case if emails is None or empty list
@@ -237,14 +207,17 @@ def background_task():
 
 @app.route('/')
 def home():
+    logging.info("Home route accessed.")
     return "Welcome to the trading API!"  # Or any message you want
 
 # Start the background task in a separate thread
 if __name__ == "__main__":
     connect_ibkr()  # Connect to IBKR API
     thread = threading.Thread(target=background_task)
-    thread.daemon = True
-    thread.start()  # Start background task in the background thread
-    
-port = int(os.environ.get("PORT", 5000))
-app.run(host="0.0.0.0", port=port)
+    thread.daemon = True  # Make sure the background task exits when the main program exits
+    thread.start()  # Start background task in a separate thread
+
+    # Run Flask app
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)
+
