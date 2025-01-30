@@ -6,10 +6,9 @@ import email
 from email.policy import default
 import logging
 from flask import Flask, jsonify, request
-import threading
 
-# Set up logging configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging configuration to show detailed debug information
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Flask app initialization
 app = Flask(__name__)
@@ -26,92 +25,60 @@ IMAP_SERVER = "imap.gmail.com"  # e.g., imap.gmail.com
 
 # Function to connect to your email and fetch unread emails
 def fetch_alert_emails():
-    logging.info('Connecting to email server...')
-    with IMAPClient(IMAP_SERVER) as client:
-        client.login(EMAIL, PASSWORD)
-        client.select_folder("INBOX")
-        logging.info('Searching for unread emails...')
-        messages = client.search([
-            "UNSEEN",
-            "FROM", "noreply@tradingview.com",
-            "SUBJECT", "guito"  # Replace with your actual subject line
-        ])
-        emails = []
-        logging.info(f'Found {len(messages)} unread emails.')
-        for msg_id, data in client.fetch(messages, "RFC822").items():
-            msg = email.message_from_bytes(data[b"RFC822"], policy=default)
-            email_content = None
-            if msg.is_multipart():
-                for part in msg.iter_parts():
-                    logging.info(f'Part content type: {part.get_content_type()}')
-                    if part.get_content_type() in ["text/plain", "text/html"]:
-                        email_content = part.get_payload(decode=True).decode('utf-8')
-                        logging.info(f'Fetched email part: {email_content}')
-                        break
-            else:
-                if msg.get_content_type() in ["text/plain", "text/html"]:
-                    email_content = msg.get_payload(decode=True).decode('utf-8')
-                    logging.info(f'Fetched email content: {email_content}')
-            if email_content:
-                emails.append(email_content)
-                logging.info('Fetched email content.')
-            client.set_flags(msg_id, [r'\Seen'])
-        return emails
+    try:
+        logging.info('Connecting to email server...')
+        with IMAPClient(IMAP_SERVER) as client:
+            client.login(EMAIL, PASSWORD)
+            client.select_folder("INBOX")
+            logging.info('Searching for unread emails...')
+            messages = client.search([
+                "UNSEEN",
+                "FROM", "noreply@tradingview.com",
+                "SUBJECT", "guito"  # Replace with your actual subject line
+            ])
+            emails = []
+            logging.info(f'Found {len(messages)} unread emails.')
+            for msg_id, data in client.fetch(messages, "RFC822").items():
+                msg = email.message_from_bytes(data[b"RFC822"], policy=default)
+                email_content = None
+                if msg.is_multipart():
+                    for part in msg.iter_parts():
+                        logging.debug(f'Part content type: {part.get_content_type()}')
+                        if part.get_content_type() in ["text/plain", "text/html"]:
+                            email_content = part.get_payload(decode=True).decode('utf-8')
+                            logging.debug(f'Fetched email part: {email_content}')
+                            break
+                else:
+                    if msg.get_content_type() in ["text/plain", "text/html"]:
+                        email_content = msg.get_payload(decode=True).decode('utf-8')
+                        logging.debug(f'Fetched email content: {email_content}')
+                if email_content:
+                    emails.append(email_content)
+                    logging.info('Fetched email content.')
+                client.set_flags(msg_id, [r'\Seen'])
+            return emails
+    except Exception as e:
+        logging.error(f"Failed to fetch emails: {e}")
+        return []
 
+# Parse the email content to extract action and symbol
 def parse_email(content):
-    # Extract action (buy/sell) and symbol from the email content
-    action_match = re.search(r"Action: (buy|sell)", content, re.IGNORECASE)
-    symbol_match = re.search(r"Symbol: ([A-Z]+(?:/[A-Z]+)?)", content, re.IGNORECASE)
+    logging.debug(f"Parsing email content: {content}")  # Log email content to verify
+    action_match = re.search(r"Action[:\s]*(buy|sell)", content, re.IGNORECASE)
+    symbol_match = re.search(r"Symbol[:\s]*([A-Za-z0-9/-]+)", content, re.IGNORECASE)
     
-    # If both action and symbol are found, return them
     if action_match and symbol_match:
+        logging.info(f"Parsed action: {action_match.group(1)}, symbol: {symbol_match.group(1)}")
         return {
             "action": action_match.group(1).lower(),  # Store the action as "buy" or "sell" (in lowercase)
             "symbol": symbol_match.group(1).upper()   # Symbol should be uppercase (e.g., BTC/USD)
         }
+    else:
+        logging.warning("No action or symbol found in the email content.")
     return None
 
-def get_existing_position(symbol):
-    """Check if there is an existing position for the given symbol."""
-    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-    try:
-        response = requests.get(endpoint, headers=headers)
-        if response.status_code == 200:
-            return response.json()  # Return the position details if it exists
-        elif response.status_code == 404:
-            return None  # No position exists for this symbol
-        else:
-            logging.error(f"Failed to fetch position for {symbol}. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-        return None
-
-def close_position(symbol):
-    """Close the existing position for the given symbol."""
-    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-    try:
-        response = requests.delete(endpoint, headers=headers)
-        if response.status_code == 200:
-            logging.info(f"Closed position for {symbol}: {response.json()}")
-            return True
-        else:
-            logging.error(f"Failed to close position for {symbol}. Response: {response.text}")
-            return False
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-        return False
-
+# Place a trade (buy/sell) using Alpaca API
 def place_trade(symbol, side, qty=0.014):
-    """Place a new trade (buy or sell)."""
     endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
@@ -146,35 +113,28 @@ def place_trade(symbol, side, qty=0.014):
         logging.error(f"Error during request: {e}")
         return None
 
-def process_trade(symbol, action):
-    """Process a trade by closing the existing position (if any) and placing a new one."""
-    # Check if there is an existing position for the symbol
-    existing_position = get_existing_position(symbol)
-    if existing_position:
-        logging.info(f"Existing position found for {symbol}. Closing it...")
-        if not close_position(symbol):
-            logging.error(f"Failed to close existing position for {symbol}.")
-            return None
-
-    # Place the new trade
-    logging.info(f"Placing new {action} order for {symbol}...")
-    return place_trade(symbol, action)
-
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
     try:
         emails = fetch_alert_emails()
         trades = []
+        logging.info(f"Checking {len(emails)} email(s) for trade signals.")
         for email_content in emails:
             trade_data = parse_email(email_content)
             if trade_data:
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 if action in ['buy', 'sell']:
-                    result = process_trade(symbol, action)  # Process the trade
+                    result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
                     trades.append({"symbol": symbol, "action": action, "result": result})
-        return jsonify({"message": "Email check complete", "trades": trades}), 200
+                else:
+                    logging.warning(f"Invalid action found in email: {action}")
+        if trades:
+            return jsonify({"message": "Trade(s) executed", "trades": trades}), 200
+        else:
+            logging.info("No valid trades found in emails.")
+            return jsonify({"message": "Email check complete, no trades found", "trades": []}), 200
     except Exception as e:
         logging.error(f"Error during trigger: {e}")
         return jsonify({"error": str(e)}), 500
@@ -184,32 +144,5 @@ def trigger_email_check():
 def health_check():
     return jsonify({"status": "Service is running"}), 200
 
-# Background task to check for emails and place trades every 40 seconds
-def background_task():
-    while True:
-        try:
-            emails = fetch_alert_emails()
-            trades = []
-            for email_content in emails:
-                trade_data = parse_email(email_content)
-                if trade_data:
-                    action = trade_data["action"]
-                    symbol = trade_data["symbol"]
-                    if action in ['buy', 'sell']:
-                        result = process_trade(symbol, action)  # Process the trade
-                        trades.append({"symbol": symbol, "action": action, "result": result})
-            time.sleep(25)  # Wait 40 seconds before checking again
-        except Exception as e:
-            logging.error(f"Error in background task: {e}")
-            time.sleep(25)  # Wait before retrying if an error occurs
-
-# Start the background task in a separate thread
-@app.before_first_request
-def start_background_task():
-    thread = threading.Thread(target=background_task)
-    thread.daemon = True
-    thread.start()
-
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
-
