@@ -3,3 +3,4 @@ imapclient==2.2.0
 python-telegram-bot==20.1
 Flask==2.3.2
 apscheduler==3.9.1
+gunicorn==20.1.0
