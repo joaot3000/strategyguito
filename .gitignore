@@ -1,7 +1,30 @@
+# Python bytecode files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Virtual environment
+venv/
+env/
+
+# Flask related files
+instance/
+.pytest_cache/
+
+# Vercel configuration files
+.vercel/
+
+# dotenv files containing sensitive credentials (like API keys)
 .env
-.DS_Store
+
+# Logs
+*.log
+
+# IDE/editor files
 .vscode/
+.idea/
+*.swp
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
