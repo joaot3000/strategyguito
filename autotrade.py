@@ -180,6 +180,10 @@ def place_trade(symbol, side, qty=0.008):
         logging.info(f"Closing existing position for {symbol} before placing new {side} trade.")
         close_position(symbol)
 
+        # Wait for 7 seconds after closing the position to ensure the trade is fully closed before placing a new one
+        logging.info(f"Waiting for 7 seconds before placing the new {side} trade...")
+        time.sleep(7)  # Sleep for 7 seconds
+
     # Now, proceed to place the new order (buy/sell)
     endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
@@ -217,7 +221,7 @@ def place_trade(symbol, side, qty=0.008):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error during request: {e}")
         return None
-
+        
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
