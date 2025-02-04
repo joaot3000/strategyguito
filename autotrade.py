@@ -145,7 +145,7 @@ def close_position(symbol):
     return None
 
 def send_telegram_message(message):
-    """Send a notification to Telegram."""
+    """Send a notification to Telegram.""" 
     url = f"https://api.telegram.org/bot{Bot}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     try:
@@ -288,14 +288,14 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check_email", check_email))
     application.add_handler(CommandHandler("trade", trade))
+    
+    # Start the scheduler in background
+    scheduler_thread = Thread(target=lambda: app.run(debug=False, use_reloader=False), daemon=True)
+    scheduler_thread.start()
 
-    # Start Flask app in background 
-    def run_flask():
-        app.run(host='0.0.0.0', port=5000)
-
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True  # Daemonize thread
-    flask_thread.start()
-
-    # Start polling for Telegram Bot
+    # Run the Telegram Bot
     application.run_polling()
+
+# Run the application
+if __name__ == "__main__":
+    main()
