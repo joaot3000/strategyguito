@@ -299,6 +299,3 @@ def main():
 
     # Start polling for Telegram Bot
     application.run_polling()
-
-if __name__ == "__main__":
-    main()
