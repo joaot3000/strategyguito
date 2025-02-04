@@ -1,8 +1,5 @@
-requests==2.31.0
-imapclient==2.3.1
-gunicorn==20.1.0
-ib_insync==0.9.74
+requests==2.28.1
+imapclient==2.2.0
+python-telegram-bot==20.1
 Flask==2.3.2
-flask-cors==5.0.0
-python-dotenv==0.21.0
-email==6.0.0a1
+apscheduler==3.9.1
