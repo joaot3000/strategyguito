@@ -15,4 +15,4 @@ jobs:
         uses: render-examples/deploy-to-render@v1
         with:
           api-key: ${{ secrets.RENDER_API_KEY }}
-          service-id: 'your-service-id'  # Add your Render service ID here
+          service-id: 'https://api.render.com/deploy/srv-cuh47td6l47c73bdg3ig?key=JGfXBZOUnkc'  # Add your Render service ID here
