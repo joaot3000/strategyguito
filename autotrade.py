@@ -18,10 +18,10 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 # Flask app initialization
 app = Flask(__name__)
 
-# Binance Testnet API credentials
-BINANCE_API_URL = "https://testnet.binance.vision/api/v3"
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "your_api_key_here")
-BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "your_secret_key_here")
+# Alpaca API credentials
+ALPACA_API_URL = "https://paper-api.alpaca.markets/v2"
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "PKJQOGOLUIX2M4GRVVUX")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "RYOxLZTXWsDtaUp7Nzm6dehhlSdlHaq8hcl1ybai")
 
 # Email credentials
 EMAIL = os.getenv("EMAIL", "jtmendescb@gmail.com")
@@ -99,7 +99,7 @@ def check_emails_periodically():
                 symbol = trade_data["symbol"]
                 logging.info(f"Parsed action: {action} for symbol: {symbol}")
                 # Here, you could add logic to check positions and place trades
-                # For example, you could call your Binance trading functions here.
+                # For example, you could call your Alpaca trading functions here.
                 result = place_trade(symbol, action)
                 logging.info(f"Trade result: {result}")
     else:
@@ -110,31 +110,51 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(check_emails_periodically, 'interval', seconds=10)  # Run every 10 seconds
 scheduler.start()
 
+# Function to get open positions for a symbol
+def get_open_position(symbol):
+    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
+    }
+    try:
+        response = requests.get(endpoint, headers=headers)
+        if response.status_code == 200:
+            position = response.json()
+            if position:
+                logging.info(f"Found open position: {position}")
+                return position
+            else:
+                logging.info(f"No open position for {symbol}.")
+                return None
+        else:
+            logging.error(f"Failed to fetch position. Response: {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error during request: {e}")
+        return None
+
 # Function to get the available balance for a given symbol
 def get_available_balance(symbol):
-    endpoint = f"{BINANCE_API_URL}/account"
+    endpoint = f"{ALPACA_API_URL}/account"
     headers = {
-        "X-MBX-APIKEY": BINANCE_API_KEY
-    }
-
-    params = {
-        'timestamp': int(time.time() * 1000),
-        'signature': generate_signature(params)
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
     }
     
     try:
-        response = requests.get(endpoint, headers=headers, params=params)
+        response = requests.get(endpoint, headers=headers)
         if response.status_code == 200:
             account_info = response.json()
-
-            balance = None
-            for asset in account_info['balances']:
-                if asset['asset'] == symbol:
-                    balance = float(asset['free'])  # Free balance available for trading
-                    logging.info(f"Available balance for {symbol}: {balance}")
-                    break
-
-            return balance if balance else 0
+            
+            # Extract balance (for cryptocurrencies, this would be in the account's cash or crypto balance)
+            if symbol == "BTC":
+                balance = float(account_info.get("crypto_balance", 0))  # Replace with actual key from response
+            else:
+                balance = float(account_info.get("cash", 0))  # For fiat balances
+                
+            logging.info(f"Available balance for {symbol}: {balance}")
+            return balance
         else:
             logging.error(f"Failed to fetch balance. Response: {response.text}")
             return None
@@ -142,104 +162,18 @@ def get_available_balance(symbol):
         logging.error(f"Error during request: {e}")
         return None
 
-# Function to close an open position (Binance doesn't directly support this like Alpaca, so we'll cancel orders)
+# Function to close the open position
 def close_position(symbol):
-    endpoint = f"{BINANCE_API_URL}/openOrders"
-    headers = {
-        "X-MBX-APIKEY": BINANCE_API_KEY
-    }
-
-    params = {
-        'symbol': symbol,
-        'timestamp': int(time.time() * 1000),
-        'signature': generate_signature(params)
-    }
-
-    try:
-        response = requests.get(endpoint, headers=headers, params=params)
-        if response.status_code == 200:
-            open_orders = response.json()
-            for order in open_orders:
-                # Cancel open orders (if any)
-                cancel_order(symbol, order['orderId'])
-        else:
-            logging.error(f"Failed to fetch open orders. Response: {response.text}")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-
-# Function to cancel an order
-def cancel_order(symbol, order_id):
-    endpoint = f"{BINANCE_API_URL}/order"
-    headers = {
-        "X-MBX-APIKEY": BINANCE_API_KEY
-    }
-
-    params = {
-        'symbol': symbol,
-        'orderId': order_id,
-        'timestamp': int(time.time() * 1000),
-        'signature': generate_signature(params)
-    }
-
-    try:
-        response = requests.delete(endpoint, headers=headers, params=params)
-        if response.status_code == 200:
-            logging.info(f"Order {order_id} for {symbol} cancelled successfully.")
-        else:
-            logging.error(f"Failed to cancel order. Response: {response.text}")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-
-# Generate signature for Binance API
-def generate_signature(params):
-    query_string = '&'.join([f"{key}={value}" for key, value in sorted(params.items())])
-    return hmac.new(BINANCE_SECRET_KEY.encode(), query_string.encode(), hashlib.sha256).hexdigest()
-
-# Function to place a trade (buy/sell) using Binance API
-def place_trade(symbol, side, qty=0.008):
-    available_balance = get_available_balance(symbol)
-
-    if available_balance is None:
-        logging.error(f"Unable to fetch available balance for {symbol}.")
-        return None
-    
-    # Check if the requested quantity is more than the available balance
-    if qty > available_balance:
-        logging.warning(f"Requested quantity {qty} exceeds available balance {available_balance}. Adjusting trade size.")
-        qty = available_balance  # Adjust the trade size to the available balance
-
-    # Create order data for Binance
-    order = {
-        "symbol": symbol,
-        "side": side.upper(),
-        "type": "MARKET",
-        "quantity": qty,
-        'timestamp': int(time.time() * 1000),
-        'signature': generate_signature(order)
-    }
-
-    try:
-        endpoint = f"{BINANCE_API_URL}/order"
-        headers = {
-            "X-MBX-APIKEY": BINANCE_API_KEY
-        }
-
-        response = requests.post(endpoint, json=order, headers=headers)
-
-        if response.status_code == 200:
-            trade_result = response.json()
-            logging.info(f"Order placed successfully: {trade_result}")
-            send_telegram_message(f"Trade executed: {side.upper()} {qty} of {symbol}")
-            return trade_result
-        else:
-            logging.error(f"Failed to place order. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-        return None
+    position = get_open_position(symbol)
+    if position:
+        qty = abs(float(position['qty']))  # The absolute quantity of the position to close
+        side = 'sell' if position['side'] == 'buy' else 'buy'  # Close the opposite side
+        logging.info(f"Closing {side} position for {symbol} with qty {qty}")
+        return place_trade(symbol, side, qty)
+    return None
 
 def send_telegram_message(message):
-    """Send a notification to Telegram."""
+    """Send a notification to Telegram.""" 
     url = f"https://api.telegram.org/bot{Bot}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     try:
@@ -252,6 +186,70 @@ def send_telegram_message(message):
         logging.error(f"Error sending Telegram message: {e}")
 
 
+# Place a trade (buy/sell) using Alpaca API
+def place_trade(symbol, side, qty=0.008):
+    # Fetch the available balance for the symbol (e.g., BTC)
+    available_balance = get_available_balance(symbol)
+    
+    if available_balance is None:
+        logging.error(f"Unable to fetch available balance for {symbol}.")
+        return None
+    
+    # Check if the requested quantity is more than the available balance
+    if qty > available_balance:
+        logging.warning(f"Requested quantity {qty} exceeds available balance {available_balance}. Adjusting trade size.")
+        qty = available_balance  # Adjust the trade size to the available balance
+
+    # First, check if there is an existing position for the symbol
+    current_position = get_open_position(symbol)
+    
+    # If there is an existing position, close it before placing a new order
+    if current_position:
+        logging.info(f"Closing existing position for {symbol} before placing new {side} trade.")
+        close_position(symbol)
+
+        # Wait for 7 seconds after closing the position to ensure the trade is fully closed before placing a new one
+        logging.info(f"Waiting for 7 seconds before placing the new {side} trade...")
+        time.sleep(7)  # Sleep for 7 seconds
+
+    # Now, proceed to place the new order (buy/sell)
+    endpoint = f"{ALPACA_API_URL}/orders"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
+    }
+
+    if side.lower() not in ["buy", "sell"]:
+        logging.error(f"Invalid side: {side}")
+        return None
+
+    order = {
+        "symbol": symbol,
+        "qty": qty,
+        "side": side,
+        "type": "market",
+        "time_in_force": "gtc"
+    }
+
+    try:
+        response = requests.post(endpoint, json=order, headers=headers)
+
+        if response.status_code == 200:
+            trade_result = response.json()
+            logging.info(f"Order placed successfully: {trade_result}")
+
+            # Send the Telegram notification
+            message = f"Que oportunidade do caraças rei. Tens aqui um {side.upper()} de {qty} de {symbol}, agora já vais para as Bahamas!"
+            send_telegram_message(message)
+
+            return trade_result
+        else:
+            logging.error(f"Failed to place order. Response: {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error during request: {e}")
+        return None
+        
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
@@ -265,8 +263,15 @@ def trigger_email_check():
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 if action in ['buy', 'sell']:
+                    # Check if there is an existing position and close it if necessary
+                    current_position = get_open_position(symbol)
+                    if current_position and current_position['side'] != action:
+                        logging.info(f"Closing the existing position for {symbol} before placing the {action} trade.")
+                        close_position(symbol)
                     result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
                     trades.append({"symbol": symbol, "action": action, "result": result})
+                else:
+                    logging.warning(f"Invalid action found in email: {action}")
         if trades:
             return jsonify({"message": "Trade(s) executed", "trades": trades}), 200
         else:
@@ -306,6 +311,12 @@ async def trade(update: Update, context: CallbackContext) -> None:
         if side not in ["buy", "sell"]:
             await update.message.reply_text("Trade side must be 'buy' or 'sell'.")
             return
+
+        # Check if there is an existing position and close it if necessary
+        current_position = get_open_position(symbol)
+        if current_position and current_position['side'] != side:
+            await update.message.reply_text(f"Closing the existing position for {symbol} before placing the {side} trade.")
+            close_position(symbol)
 
         result = place_trade(symbol, side, qty)
         if result:
