@@ -2,14 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "autotrade.py",  // This is the entry point of your app (it might be named differently) 
+      "src": "autotrade.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "autotrade.py"  // Route all requests to your app 
+      "dest": "autotrade.py" 
     }
   ]
 }
