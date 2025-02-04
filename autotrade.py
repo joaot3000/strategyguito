@@ -133,7 +133,35 @@ def get_open_position(symbol):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error during request: {e}")
         return None
-        
+
+# Function to get the available balance for a given symbol
+def get_available_balance(symbol):
+    endpoint = f"{ALPACA_API_URL}/account"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
+    }
+    
+    try:
+        response = requests.get(endpoint, headers=headers)
+        if response.status_code == 200:
+            account_info = response.json()
+            
+            # Extract balance (for cryptocurrencies, this would be in the account's cash or crypto balance)
+            if symbol == "BTC":
+                balance = float(account_info.get("crypto_balance", 0))  # Replace with actual key from response
+            else:
+                balance = float(account_info.get("cash", 0))  # For fiat balances
+                
+            logging.info(f"Available balance for {symbol}: {balance}")
+            return balance
+        else:
+            logging.error(f"Failed to fetch balance. Response: {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error during request: {e}")
+        return None
+
 # Function to close the open position
 def close_position(symbol):
     position = get_open_position(symbol)
