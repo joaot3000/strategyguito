@@ -1,11 +1,16 @@
-import time
+import logging
 import re
 import requests
 from imapclient import IMAPClient
 import email
 from email.policy import default
-import logging
-from flask import Flask, jsonify, request
+from telegram import Bot, Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from flask import Flask, jsonify
+import os
+from threading import Thread
+from apscheduler.schedulers.background import BackgroundScheduler
+import time
 
 # Set up logging configuration to show detailed debug information
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,13 +20,17 @@ app = Flask(__name__)
 
 # Alpaca API credentials
 ALPACA_API_URL = "https://paper-api.alpaca.markets/v2"
-ALPACA_API_KEY = "PKCCAHDTUSPTYNMRQBA2"
-ALPACA_SECRET_KEY = "Peh8XoPBwmgrxxfPvGKO5F8SnfHZt6lVsybUJ8qy"
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "PKJQOGOLUIX2M4GRVVUX")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "RYOxLZTXWsDtaUp7Nzm6dehhlSdlHaq8hcl1ybai")
 
 # Email credentials
-EMAIL = "jtmendescb@gmail.com"
-PASSWORD = "pkdj ptea aioo wqfy"
+EMAIL = os.getenv("EMAIL", "jtmendescb@gmail.com")
+PASSWORD = os.getenv("EMAIL_PASSWORD", "pkdj ptea aioo wqfy")
 IMAP_SERVER = "imap.gmail.com"  # e.g., imap.gmail.com
+
+# Telegram Bot credentials
+Bot = os.getenv("Bot", "7897853987:AAEVLNuZxCWT8CmzqszUf9sJ5PdLfNq4vLg")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5825643489")
 
 # Function to connect to your email and fetch unread emails
 def fetch_alert_emails():
@@ -32,12 +41,13 @@ def fetch_alert_emails():
             client.select_folder("INBOX")
             logging.info('Searching for unread emails...')
             messages = client.search([
-                "UNSEEN",
-                "FROM", "noreply@tradingview.com",
-                "SUBJECT", "guito"  # Replace with your actual subject line
+                "UNSEEN",  # Fetch unread messages
+                "FROM", "noreply@tradingview.com",  # Sender email address
+                "SUBJECT", "guito"  # Subject filter (adjust as needed)
             ])
+            if not messages:
+                logging.info("No unread emails matching criteria found.")
             emails = []
-            logging.info(f'Found {len(messages)} unread emails.')
             for msg_id, data in client.fetch(messages, "RFC822").items():
                 msg = email.message_from_bytes(data[b"RFC822"], policy=default)
                 email_content = None
@@ -54,8 +64,8 @@ def fetch_alert_emails():
                         logging.debug(f'Fetched email content: {email_content}')
                 if email_content:
                     emails.append(email_content)
-                    logging.info('Fetched email content.')
-                client.set_flags(msg_id, [r'\Seen'])
+                    logging.info('Fetched email content successfully.')
+                client.set_flags(msg_id, [r'\Seen'])  # Mark email as read
             return emails
     except Exception as e:
         logging.error(f"Failed to fetch emails: {e}")
@@ -77,35 +87,114 @@ def parse_email(content):
         logging.warning("No action or symbol found in the email content.")
     return None
 
+def check_emails_periodically():
+    logging.info("Checking for new emails...")
+    emails = fetch_alert_emails()  # This will fetch unread emails
+    if emails:
+        logging.info(f"Found {len(emails)} new emails.")
+        for email_content in emails:
+            trade_data = parse_email(email_content)  # Parse email for trade signal
+            if trade_data:
+                action = trade_data["action"]
+                symbol = trade_data["symbol"]
+                logging.info(f"Parsed action: {action} for symbol: {symbol}")
+                # Here, you could add logic to check positions and place trades
+                # For example, you could call your Alpaca trading functions here.
+                result = place_trade(symbol, action)
+                logging.info(f"Trade result: {result}")
+    else:
+        logging.info("No new emails found.")
+
+# Now, set the scheduler to run the check_emails_periodically() every 10 seconds
+scheduler = BackgroundScheduler()
+scheduler.add_job(check_emails_periodically, 'interval', seconds=10)  # Run every 10 seconds
+scheduler.start()
+
+# Function to get open positions for a symbol
+def get_open_position(symbol):
+    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
+    }
+    try:
+        response = requests.get(endpoint, headers=headers)
+        if response.status_code == 200:
+            position = response.json()
+            if position:
+                logging.info(f"Found open position: {position}")
+                return position
+            else:
+                logging.info(f"No open position for {symbol}.")
+                return None
+        else:
+            logging.error(f"Failed to fetch position. Response: {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error during request: {e}")
+        return None
+
+# Function to close the open position
+def close_position(symbol):
+    position = get_open_position(symbol)
+    if position:
+        qty = abs(float(position['qty']))  # The absolute quantity of the position to close
+        side = 'sell' if position['side'] == 'buy' else 'buy'  # Close the opposite side
+        logging.info(f"Closing {side} position for {symbol} with qty {qty}")
+        return place_trade(symbol, side, qty)
+    return None
+
+def send_telegram_message(message):
+    """Send a notification to Telegram."""
+    url = f"https://api.telegram.org/bot{Bot}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            logging.info("Telegram notification sent successfully.")
+        else:
+            logging.error(f"Failed to send Telegram message: {response.text}")
+    except Exception as e:
+        logging.error(f"Error sending Telegram message: {e}")
+
+
 # Place a trade (buy/sell) using Alpaca API
-def place_trade(symbol, side, qty=0.014):
+def place_trade(symbol, side, qty=0.008):
     endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
     }
 
-    # Ensure the side is either "buy" or "sell"
     if side.lower() not in ["buy", "sell"]:
         logging.error(f"Invalid side: {side}")
         return None
 
+    current_position = get_open_position(symbol)
+    if current_position and current_position['side'] != side:
+        logging.info(f"Closing existing position for {symbol} before placing {side} trade.")
+        close_position(symbol)
+
     order = {
         "symbol": symbol,
         "qty": qty,
-        "side": side,  # Ensure it's in lowercase
+        "side": side,
         "type": "market",
         "time_in_force": "gtc"
     }
 
     try:
-        # Send the POST request to place the order
         response = requests.post(endpoint, json=order, headers=headers)
 
-        # Check the HTTP status code
         if response.status_code == 200:
-            logging.info(f"Order placed successfully: {response.json()}")
-            return response.json()  # This should work if the response is valid JSON
+            trade_result = response.json()
+            logging.info(f"Order placed successfully: {trade_result}")
+
+            # Send the Telegram notification
+            message = f"Que oportunidade do caraças rei. Tens aqui um {side.upper()} de {qty} de {symbol}, agora já vais para as Bahamas!"
+            send_telegram_message(message)
+
+            return trade_result
         else:
             logging.error(f"Failed to place order. Response: {response.text}")
             return None
@@ -126,6 +215,11 @@ def trigger_email_check():
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 if action in ['buy', 'sell']:
+                    # Check if there is an existing position and close it if necessary
+                    current_position = get_open_position(symbol)
+                    if current_position and current_position['side'] != action:
+                        logging.info(f"Closing the existing position for {symbol} before placing the {action} trade.")
+                        close_position(symbol)
                     result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
                     trades.append({"symbol": symbol, "action": action, "result": result})
                 else:
@@ -144,5 +238,67 @@ def trigger_email_check():
 def health_check():
     return jsonify({"status": "Service is running"}), 200
 
+# Telegram Bot Setup
+async def start(update: Update, context: CallbackContext) -> None:
+    """Start command.""" 
+    await update.message.reply_text("Welcome to the Trading Bot!")
+
+async def check_email(update: Update, context: CallbackContext) -> None:
+    """Fetch email trade signals.""" 
+    emails = fetch_alert_emails() 
+    if emails: 
+        await update.message.reply_text(f"Found {len(emails)} new email(s).")
+    else:
+        await update.message.reply_text("No new emails found.")
+
+async def trade(update: Update, context: CallbackContext) -> None:
+    """Place a trade via Telegram command.""" 
+    try:
+        args = context.args
+        if len(args) != 3:
+            await update.message.reply_text("Usage: /trade <symbol> <qty> <buy/sell>")
+            return
+
+        symbol, qty, side = args[0], float(args[1]), args[2].lower()
+        if side not in ["buy", "sell"]:
+            await update.message.reply_text("Trade side must be 'buy' or 'sell'.")
+            return
+
+        # Check if there is an existing position and close it if necessary
+        current_position = get_open_position(symbol)
+        if current_position and current_position['side'] != side:
+            await update.message.reply_text(f"Closing the existing position for {symbol} before placing the {side} trade.")
+            close_position(symbol)
+
+        result = place_trade(symbol, side, qty)
+        if result:
+            await update.message.reply_text(f"Trade executed: {result}")
+        else:
+            await update.message.reply_text("Failed to execute trade.")
+
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
+
+# Run the Telegram Bot with Flask
+def main():
+    """Run the bot.""" 
+    application = Application.builder().token(Bot).build()
+
+    # Add command handlers 
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("check_email", check_email))
+    application.add_handler(CommandHandler("trade", trade))
+
+    # Start Flask app in background 
+    def run_flask():
+        app.run(host='0.0.0.0', port=5000)
+
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True  # Daemonize thread
+    flask_thread.start()
+
+    # Start polling for Telegram Bot
+    application.run_polling()
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    main()
