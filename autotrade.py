@@ -133,7 +133,7 @@ def get_open_position(symbol):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error during request: {e}")
         return None
-
+        
 # Function to close the open position
 def close_position(symbol):
     position = get_open_position(symbol)
@@ -160,6 +160,27 @@ def send_telegram_message(message):
 
 # Place a trade (buy/sell) using Alpaca API
 def place_trade(symbol, side, qty=0.008):
+    # Fetch the available balance for the symbol (e.g., BTC)
+    available_balance = get_available_balance(symbol)
+    
+    if available_balance is None:
+        logging.error(f"Unable to fetch available balance for {symbol}.")
+        return None
+    
+    # Check if the requested quantity is more than the available balance
+    if qty > available_balance:
+        logging.warning(f"Requested quantity {qty} exceeds available balance {available_balance}. Adjusting trade size.")
+        qty = available_balance  # Adjust the trade size to the available balance
+
+    # First, check if there is an existing position for the symbol
+    current_position = get_open_position(symbol)
+    
+    # If there is an existing position, close it before placing a new order
+    if current_position:
+        logging.info(f"Closing existing position for {symbol} before placing new {side} trade.")
+        close_position(symbol)
+
+    # Now, proceed to place the new order (buy/sell)
     endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
@@ -169,11 +190,6 @@ def place_trade(symbol, side, qty=0.008):
     if side.lower() not in ["buy", "sell"]:
         logging.error(f"Invalid side: {side}")
         return None
-
-    current_position = get_open_position(symbol)
-    if current_position and current_position['side'] != side:
-        logging.info(f"Closing existing position for {symbol} before placing {side} trade.")
-        close_position(symbol)
 
     order = {
         "symbol": symbol,
