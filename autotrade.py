@@ -165,16 +165,17 @@ def get_available_balance(symbol):
 # Function to close the open position
 def close_position(symbol):
     position = get_open_position(symbol)
-    if position['side'] == 'long':
-    side = 'sell'  # To close a long position, you sell
-elif position['side'] == 'short':
-    side = 'buy'  # To close a short position, you buy
-else:
-    logging.error(f"Unknown position side: {position['side']} for {symbol}")
+    if position:
+        qty = abs(float(position['qty']))  # The absolute quantity of the position to close
+        if position['side'] == 'long':
+            side = 'sell'  # To close a long position, you sell
+        else:
+            side = 'buy'   # To close a short position, you buy
+
+        logging.info(f"Closing {side} position for {symbol} with qty {qty}")
+        return place_trade(symbol, side, qty)
     return None
 
-logging.info(f"Closing {side} position for {symbol} with qty {qty}")
-return place_trade(symbol, side, qty)  # Place the trade to close the position
 
 
 def send_telegram_message(message):
