@@ -111,8 +111,8 @@ scheduler.add_job(check_emails_periodically, 'interval', seconds=10)  # Run ever
 scheduler.start()
 
 # Function to get open positions for a symbol
-def get_open_position(symbol):
-    endpoint = f"{ALPACA_API_URL}/positions/{symbol}"
+def get_open_crypto_position(symbol):
+    endpoint = f"{ALPACA_API_URL}/crypto/{symbol}/positions"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
@@ -120,10 +120,10 @@ def get_open_position(symbol):
     try:
         response = requests.get(endpoint, headers=headers)
         if response.status_code == 200:
-            position = response.json()
-            if position:
-                logging.info(f"Found open position: {position}")
-                return position
+            positions = response.json()
+            if positions:
+                logging.info(f"Found open position: {positions}")
+                return positions[0]  # Return the first position (if any)
             else:
                 logging.info(f"No open position for {symbol}.")
                 return None
@@ -201,7 +201,12 @@ def place_trade(symbol, side, qty=0.008):
         qty = available_balance  # Adjust the trade size to the available balance
 
     # First, check if there is an existing position for the symbol
-    current_position = get_open_position(symbol)
+    if symbol.endswith("/USD"):
+        # For cryptocurrencies, use the crypto-specific endpoint
+        current_position = get_open_crypto_position(symbol.replace("/USD", ""))
+    else:
+        # For stocks, use the regular positions endpoint
+        current_position = get_open_position(symbol)
     
     # If there is an existing position, close it before placing a new order
     if current_position:
@@ -233,13 +238,14 @@ def place_trade(symbol, side, qty=0.008):
 
     try:
         response = requests.post(endpoint, json=order, headers=headers)
+        logging.info(f"API Response: {response.text}")  # Log the API response
 
         if response.status_code == 200:
             trade_result = response.json()
             logging.info(f"Order placed successfully: {trade_result}")
 
             # Send the Telegram notification
-            message = f"Que oportunidade do caraças rei. Tens aqui um {side.upper()} de {qty} de {symbol}, agora já vais para as Bahamas!"
+            message = f"Trade executed: {side.upper()} {qty} {symbol}"
             send_telegram_message(message)
 
             return trade_result
