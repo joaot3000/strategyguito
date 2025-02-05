@@ -11,6 +11,7 @@ import os
 from threading import Thread
 from apscheduler.schedulers.background import BackgroundScheduler
 import time
+import alpaca_trade_api as tradeapi
 
 # Set up logging configuration to show detailed debug information
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
