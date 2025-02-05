@@ -170,19 +170,24 @@ def close_position(symbol, action):
         # If we have an open long position, close it by selling
         if current_position and current_position['side'] == 'long':
             logging.info(f"Received sell signal for {symbol}. Closing long position.")
-            close_position(symbol)  # Close the long position by selling
+            close_trade(symbol, 'sell', abs(float(current_position['qty'])))  # Close the long position by selling
         elif not current_position:
             logging.info(f"No open position for {symbol}. Proceeding with sell.")
-        place_trade(symbol, 'sell')  # Proceed with the sell action (open or close)
+        else:
+            logging.info(f"Proceeding with sell for {symbol}, no open long position.")
 
     elif action == "buy":
         # If we have an open short position, close it by buying
         if current_position and current_position['side'] == 'short':
             logging.info(f"Received buy signal for {symbol}. Closing short position.")
-            close_position(symbol)  # Close the short position by buying
+            close_trade(symbol, 'buy', abs(float(current_position['qty'])))  # Close the short position by buying
         elif not current_position:
             logging.info(f"No open position for {symbol}. Proceeding with buy.")
-        place_trade(symbol, 'buy')  # Proceed with the buy action (open or close)
+        else:
+            logging.info(f"Proceeding with buy for {symbol}, no open short position.")
+    
+    else:
+        logging.error(f"Invalid action: {action}. Expected 'sell' or 'buy'.")
 
 def send_telegram_message(message):
     """Send a notification to Telegram.""" 
