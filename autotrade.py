@@ -11,7 +11,6 @@ import os
 from threading import Thread
 from apscheduler.schedulers.background import BackgroundScheduler
 import time
-import alpaca_trade_api as tradeapi
 
 # Set up logging configuration to show detailed debug information
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,7 +31,6 @@ IMAP_SERVER = "imap.gmail.com"  # e.g., imap.gmail.com
 # Telegram Bot credentials
 Bot = os.getenv("Bot", "7897853987:AAEVLNuZxCWT8CmzqszUf9sJ5PdLfNq4vLg")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5825643489")
-api = tradeapi.REST('APCA-API-KEY-ID', 'APCA-API-SECRET-KEY', base_url='https://paper-api.alpaca.markets/v2')
 
 # Function to connect to your email and fetch unread emails
 def fetch_alert_emails():
