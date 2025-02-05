@@ -165,12 +165,17 @@ def get_available_balance(symbol):
 # Function to close the open position
 def close_position(symbol):
     position = get_open_position(symbol)
-    if position:
-        qty = abs(float(position['qty']))  # The absolute quantity of the position to close
-        side = 'sell' if position['side'] == 'buy' else 'buy'  # Close the opposite side
-        logging.info(f"Closing {side} position for {symbol} with qty {qty}")
-        return place_trade(symbol, side, qty)
+    if position['side'] == 'long':
+    side = 'sell'  # To close a long position, you sell
+elif position['side'] == 'short':
+    side = 'buy'  # To close a short position, you buy
+else:
+    logging.error(f"Unknown position side: {position['side']} for {symbol}")
     return None
+
+logging.info(f"Closing {side} position for {symbol} with qty {qty}")
+return place_trade(symbol, side, qty)  # Place the trade to close the position
+
 
 def send_telegram_message(message):
     """Send a notification to Telegram.""" 
@@ -201,21 +206,16 @@ def place_trade(symbol, side, qty=0.008):
         qty = available_balance  # Adjust the trade size to the available balance
 
     # First, check if there is an existing position for the symbol
-    if symbol.endswith("/USD"):
-        # For cryptocurrencies, use the crypto-specific endpoint
-        current_position = get_open_crypto_position(symbol.replace("/USD", ""))
-    else:
-        # For stocks, use the regular positions endpoint
-        current_position = get_open_position(symbol)
+    current_position = get_open_position(symbol)
     
     # If there is an existing position, close it before placing a new order
     if current_position:
         logging.info(f"Closing existing position for {symbol} before placing new {side} trade.")
-        close_position(symbol)
+        close_position(symbol)  # Close the current position before placing a new one
 
         # Wait for 7 seconds after closing the position to ensure the trade is fully closed before placing a new one
         logging.info(f"Waiting for 7 seconds before placing the new {side} trade...")
-        time.sleep(7)  # Sleep for 7 seconds
+        time.sleep(7)  # Sleep for 7 seconds to ensure the position is closed
 
     # Now, proceed to place the new order (buy/sell)
     endpoint = f"{ALPACA_API_URL}/orders"
@@ -238,16 +238,10 @@ def place_trade(symbol, side, qty=0.008):
 
     try:
         response = requests.post(endpoint, json=order, headers=headers)
-        logging.info(f"API Response: {response.text}")  # Log the API response
 
         if response.status_code == 200:
             trade_result = response.json()
             logging.info(f"Order placed successfully: {trade_result}")
-
-            # Send the Telegram notification
-            message = f"Trade executed: {side.upper()} {qty} {symbol}"
-            send_telegram_message(message)
-
             return trade_result
         else:
             logging.error(f"Failed to place order. Response: {response.text}")
@@ -255,6 +249,7 @@ def place_trade(symbol, side, qty=0.008):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error during request: {e}")
         return None
+
         
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
