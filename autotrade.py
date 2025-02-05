@@ -1,27 +1,22 @@
 import logging
 import re
-import requests
+import os
 from imapclient import IMAPClient
 import email
 from email.policy import default
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 from flask import Flask, jsonify
-import os
 from threading import Thread
 from apscheduler.schedulers.background import BackgroundScheduler
 import time
+from ib_insync import *
 
 # Set up logging configuration to show detailed debug information
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Flask app initialization
 app = Flask(__name__)
-
-# Alpaca API credentials
-ALPACA_API_URL = "https://paper-api.alpaca.markets/v2"
-ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "PKJQOGOLUIX2M4GRVVUX")
-ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "RYOxLZTXWsDtaUp7Nzm6dehhlSdlHaq8hcl1ybai")
 
 # Email credentials
 EMAIL = os.getenv("EMAIL", "jtmendescb@gmail.com")
@@ -34,6 +29,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5825643489")
 
 # Initialize Telegram Bot
 telegram_bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+# Initialize IBKR client
+ib = IB()
 
 # Function to send Telegram messages
 async def send_telegram_message(message):
@@ -128,79 +126,45 @@ def get_open_position(symbol):
     Fetch all positions and return the one for the given symbol.
     Returns None if no position is found for the symbol.
     """
-    endpoint = f"{ALPACA_API_URL}/positions"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-    
-    try:
-        response = requests.get(endpoint, headers=headers)
-        if response.status_code == 200:
-            positions = response.json()
-            for position in positions:
-                if position['symbol'] == symbol:
-                    return {
-                        'symbol': position['symbol'],
-                        'qty': position['qty'],
-                        'side': position['side'],  # 'long' or 'short'
-                    }
-            # Return None if no position found for the symbol
-            return None
-        else:
-            logging.error(f"Failed to fetch positions. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching open position: {e}")
-        return None
+    positions = ib.positions()
+    for position in positions:
+        if position.contract.symbol == symbol:
+            return {
+                'symbol': position.contract.symbol,
+                'qty': position.position,
+                'side': 'long' if position.position > 0 else 'short',
+            }
+    return None
 
-# Function to get the available balance for a given symbol (BTC for example)
 def get_available_balance(symbol):
-    endpoint = f"{ALPACA_API_URL}/account"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
-    
-    try:
-        response = requests.get(endpoint, headers=headers)
-        if response.status_code == 200:
-            account_info = response.json()
-            # Extract balance (for cryptocurrencies, this would be in the account's cash or crypto balance)
-            if symbol == "BTC":
-                balance = float(account_info.get("crypto_balance", 0))  # Replace with actual key from response
-            else:
-                balance = float(account_info.get("cash", 0))  # For fiat balances
-                
-            logging.info(f"Available balance for {symbol}: {balance}")
-            return balance
-        else:
-            logging.error(f"Failed to fetch balance. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
-        return None
+    """
+    Get the available balance for a given symbol.
+    """
+    account_values = ib.accountValues()
+    for value in account_values:
+        if value.tag == 'AvailableFunds' and value.currency == 'USD':
+            return float(value.value)
+    return None
 
-# Function to close the open position
 def close_position(symbol, action):
-    # Check if there is an existing position
+    """
+    Close the open position for the given symbol.
+    """
     current_position = get_open_position(symbol)
 
     if action == "sell":
-        # If we have an open long position, close it by selling
         if current_position and current_position['side'] == 'long':
             logging.info(f"Received sell signal for {symbol}. Closing long position.")
-            close_trade(symbol, 'sell', abs(float(current_position['qty'])))  # Close the long position by selling
+            close_trade(symbol, 'sell', abs(float(current_position['qty'])))
         elif not current_position:
             logging.info(f"No open position for {symbol}. Proceeding with sell.")
         else:
             logging.info(f"Proceeding with sell for {symbol}, no open long position.")
 
     elif action == "buy":
-        # If we have an open short position, close it by buying
         if current_position and current_position['side'] == 'short':
             logging.info(f"Received buy signal for {symbol}. Closing short position.")
-            close_trade(symbol, 'buy', abs(float(current_position['qty'])))  # Close the short position by buying
+            close_trade(symbol, 'buy', abs(float(current_position['qty'])))
         elif not current_position:
             logging.info(f"No open position for {symbol}. Proceeding with buy.")
         else:
@@ -209,7 +173,6 @@ def close_position(symbol, action):
     else:
         logging.error(f"Invalid action: {action}. Expected 'sell' or 'buy'.")
 
-# Function to place a trade (buy/sell)
 def place_trade(symbol, side, qty=0.008):
     """
     Place a market order for the given symbol and side (buy/sell).
@@ -224,37 +187,16 @@ def place_trade(symbol, side, qty=0.008):
         logging.warning(f"Requested quantity {qty} exceeds available balance {available_balance}. Adjusting trade size.")
         qty = available_balance  # Adjust the trade size to the available balance
 
-    # Place the new trade order (buy/sell)
-    endpoint = f"{ALPACA_API_URL}/orders"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
+    contract = Stock(symbol, 'SMART', 'USD')
+    order = MarketOrder(side.upper(), qty)
+    trade = ib.placeOrder(contract, order)
+    ib.sleep(1)  # Wait for the order to be filled
 
-    if side.lower() not in ["buy", "sell"]:
-        logging.error(f"Invalid side: {side}")
-        return None
-
-    order = {
-        "symbol": symbol,
-        "qty": qty,
-        "side": side,
-        "type": "market",
-        "time_in_force": "gtc"
-    }
-
-    try:
-        response = requests.post(endpoint, json=order, headers=headers)
-
-        if response.status_code == 200:
-            trade_result = response.json()
-            logging.info(f"Order placed successfully: {trade_result}")
-            return trade_result
-        else:
-            logging.error(f"Failed to place order. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
+    if trade.orderStatus.status == 'Filled':
+        logging.info(f"Order placed successfully: {trade}")
+        return trade
+    else:
+        logging.error(f"Failed to place order. Status: {trade.orderStatus.status}")
         return None
 
 def close_trade(symbol, side, qty):
@@ -276,12 +218,11 @@ def trigger_email_check():
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 if action in ['buy', 'sell']:
-                    # Check if there is an existing position and close it if necessary
                     current_position = get_open_position(symbol)
                     if current_position and current_position['side'] != action:
                         logging.info(f"Closing the existing position for {symbol} before placing the {action} trade.")
                         close_position(symbol, action)
-                    result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
+                    result = place_trade(symbol, action)
                     trades.append({"symbol": symbol, "action": action, "result": result})
                 else:
                     logging.warning(f"Invalid action found in email: {action}")
@@ -325,7 +266,6 @@ async def trade(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text("Trade side must be 'buy' or 'sell'.")
             return
 
-        # Check if there is an existing position and close it if necessary
         current_position = get_open_position(symbol)
         if current_position and current_position['side'] != side:
             await update.message.reply_text(f"Closing the existing position for {symbol} before placing the {side} trade.")
@@ -357,6 +297,9 @@ def main():
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True  # Daemonize thread
     flask_thread.start()
+
+    # Connect to IBKR
+    ib.connect('127.0.0.1', 7497, clientId=1)  # Adjust host and port as needed
 
     # Start polling for Telegram Bot
     application.run_polling()
