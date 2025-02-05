@@ -31,6 +31,7 @@ IMAP_SERVER = "imap.gmail.com"  # e.g., imap.gmail.com
 # Telegram Bot credentials
 Bot = os.getenv("Bot", "7897853987:AAEVLNuZxCWT8CmzqszUf9sJ5PdLfNq4vLg")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5825643489")
+api = tradeapi.REST('APCA-API-KEY-ID', 'APCA-API-SECRET-KEY', base_url='https://paper-api.alpaca.markets/v2')
 
 # Function to connect to your email and fetch unread emails
 def fetch_alert_emails():
@@ -111,27 +112,24 @@ scheduler.add_job(check_emails_periodically, 'interval', seconds=10)  # Run ever
 scheduler.start()
 
 # Function to get open positions for a symbol
-def get_open_crypto_position(symbol):
-    endpoint = f"{ALPACA_API_URL}/crypto/{symbol}/positions"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
-    }
+def get_open_position(symbol):
     try:
-        response = requests.get(endpoint, headers=headers)
-        if response.status_code == 200:
-            positions = response.json()
-            if positions:
-                logging.info(f"Found open position: {positions}")
-                return positions[0]  # Return the first position (if any)
-            else:
-                logging.info(f"No open position for {symbol}.")
-                return None
-        else:
-            logging.error(f"Failed to fetch position. Response: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error during request: {e}")
+        # Fetch all positions
+        positions = api.list_positions()
+        
+        # Check each position and return the one for the given symbol
+        for position in positions:
+            if position.symbol == symbol:
+                return {
+                    'symbol': position.symbol,
+                    'qty': position.qty,
+                    'side': position.side,  # long or short
+                }
+        # Return None if no position found for the symbol
+        return None
+    except Exception as e:
+        # Log the exception if something goes wrong
+        logging.error(f"Error fetching open position: {str(e)}")
         return None
 
 # Function to get the available balance for a given symbol
