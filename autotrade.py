@@ -110,28 +110,38 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(check_emails_periodically, 'interval', seconds=10)  # Run every 10 seconds
 scheduler.start()
 
-# Function to get open positions for a symbol
 def get_open_position(symbol):
+    """
+    Fetch all positions and return the one for the given symbol.
+    Returns None if no position is found for the symbol.
+    """
+    endpoint = f"{ALPACA_API_URL}/positions"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY
+    }
+    
     try:
-        # Fetch all positions
-        positions = api.list_positions()
-        
-        # Check each position and return the one for the given symbol
-        for position in positions:
-            if position.symbol == symbol:
-                return {
-                    'symbol': position.symbol,
-                    'qty': position.qty,
-                    'side': position.side,  # long or short
-                }
-        # Return None if no position found for the symbol
-        return None
-    except Exception as e:
-        # Log the exception if something goes wrong
-        logging.error(f"Error fetching open position: {str(e)}")
+        response = requests.get(endpoint, headers=headers)
+        if response.status_code == 200:
+            positions = response.json()
+            for position in positions:
+                if position['symbol'] == symbol:
+                    return {
+                        'symbol': position['symbol'],
+                        'qty': position['qty'],
+                        'side': position['side'],  # 'long' or 'short'
+                    }
+            # Return None if no position found for the symbol
+            return None
+        else:
+            logging.error(f"Failed to fetch positions. Response: {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching open position: {e}")
         return None
 
-# Function to get the available balance for a given symbol
+# Function to get the available balance for a given symbol (BTC for example)
 def get_available_balance(symbol):
     endpoint = f"{ALPACA_API_URL}/account"
     headers = {
@@ -143,7 +153,6 @@ def get_available_balance(symbol):
         response = requests.get(endpoint, headers=headers)
         if response.status_code == 200:
             account_info = response.json()
-            
             # Extract balance (for cryptocurrencies, this would be in the account's cash or crypto balance)
             if symbol == "BTC":
                 balance = float(account_info.get("crypto_balance", 0))  # Replace with actual key from response
@@ -161,7 +170,9 @@ def get_available_balance(symbol):
 
 # Function to close the open position
 def close_position(symbol, action):
-    # Check if there is an existing position
+    """
+    Close the open position depending on the action (buy/sell).
+    """
     current_position = get_open_position(symbol)
 
     if action == "sell":
@@ -187,47 +198,22 @@ def close_position(symbol, action):
     else:
         logging.error(f"Invalid action: {action}. Expected 'sell' or 'buy'.")
 
-def send_telegram_message(message):
-    """Send a notification to Telegram.""" 
-    url = f"https://api.telegram.org/bot{Bot}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    try:
-        response = requests.post(url, json=payload)
-        if response.status_code == 200:
-            logging.info("Telegram notification sent successfully.")
-        else:
-            logging.error(f"Failed to send Telegram message: {response.text}")
-    except Exception as e:
-        logging.error(f"Error sending Telegram message: {e}")
-
-
-# Place a trade (buy/sell) using Alpaca API
+# Function to place a trade (buy/sell)
 def place_trade(symbol, side, qty=0.008):
-    # Fetch the available balance for the symbol (e.g., BTC)
+    """
+    Place a market order for the given symbol and side (buy/sell).
+    """
     available_balance = get_available_balance(symbol)
     
     if available_balance is None:
         logging.error(f"Unable to fetch available balance for {symbol}.")
         return None
     
-    # Check if the requested quantity is more than the available balance
     if qty > available_balance:
         logging.warning(f"Requested quantity {qty} exceeds available balance {available_balance}. Adjusting trade size.")
         qty = available_balance  # Adjust the trade size to the available balance
 
-    # First, check if there is an existing position for the symbol
-    current_position = get_open_position(symbol)
-    
-    # If there is an existing position, close it before placing a new order
-    if current_position:
-        logging.info(f"Closing existing position for {symbol} before placing new {side} trade.")
-        close_position(symbol)  # Close the current position before placing a new one
-
-        # Wait for 7 seconds after closing the position to ensure the trade is fully closed before placing a new one
-        logging.info(f"Waiting for 7 seconds before placing the new {side} trade...")
-        time.sleep(7)  # Sleep for 7 seconds to ensure the position is closed
-
-    # Now, proceed to place the new order (buy/sell)
+    # Place the new trade order (buy/sell)
     endpoint = f"{ALPACA_API_URL}/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_API_KEY,
@@ -260,7 +246,11 @@ def place_trade(symbol, side, qty=0.008):
         logging.error(f"Error during request: {e}")
         return None
 
-        
+def close_trade(symbol, side, qty):
+    """
+    Close a trade (buy or sell) for a symbol with the specified quantity.
+    """
+    return place_trade(symbol, side, qty)
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
