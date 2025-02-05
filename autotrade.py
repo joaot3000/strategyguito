@@ -29,8 +29,18 @@ PASSWORD = os.getenv("EMAIL_PASSWORD", "pkdj ptea aioo wqfy")
 IMAP_SERVER = "imap.gmail.com"  # e.g., imap.gmail.com
 
 # Telegram Bot credentials
-Bot = os.getenv("Bot", "7897853987:AAEVLNuZxCWT8CmzqszUf9sJ5PdLfNq4vLg")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7897853987:AAEVLNuZxCWT8CmzqszUf9sJ5PdLfNq4vLg")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5825643489")
+
+# Initialize Telegram Bot
+telegram_bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+# Function to send Telegram messages
+async def send_telegram_message(message):
+    try:
+        await telegram_bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    except Exception as e:
+        logging.error(f"Failed to send Telegram message: {e}")
 
 # Function to connect to your email and fetch unread emails
 def fetch_alert_emails():
@@ -98,10 +108,13 @@ def check_emails_periodically():
                 action = trade_data["action"]
                 symbol = trade_data["symbol"]
                 logging.info(f"Parsed action: {action} for symbol: {symbol}")
-                # Here, you could add logic to check positions and place trades
-                # For example, you could call your Alpaca trading functions here.
+                # Close existing position if necessary
+                close_position(symbol, action)
+                # Place the new trade
                 result = place_trade(symbol, action)
                 logging.info(f"Trade result: {result}")
+                # Send Telegram message
+                send_telegram_message(f"Trade executed: {action} {symbol}, Result: {result}")
     else:
         logging.info("No new emails found.")
 
@@ -170,9 +183,7 @@ def get_available_balance(symbol):
 
 # Function to close the open position
 def close_position(symbol, action):
-    """
-    Close the open position depending on the action (buy/sell).
-    """
+    # Check if there is an existing position
     current_position = get_open_position(symbol)
 
     if action == "sell":
@@ -251,6 +262,7 @@ def close_trade(symbol, side, qty):
     Close a trade (buy or sell) for a symbol with the specified quantity.
     """
     return place_trade(symbol, side, qty)
+
 # Flask route to trigger email checking and trade placement
 @app.route('/trigger', methods=['GET'])
 def trigger_email_check():
@@ -268,7 +280,7 @@ def trigger_email_check():
                     current_position = get_open_position(symbol)
                     if current_position and current_position['side'] != action:
                         logging.info(f"Closing the existing position for {symbol} before placing the {action} trade.")
-                        close_position(symbol)
+                        close_position(symbol, action)
                     result = place_trade(symbol, action)  # "buy" or "sell" will be passed here
                     trades.append({"symbol": symbol, "action": action, "result": result})
                 else:
@@ -317,7 +329,7 @@ async def trade(update: Update, context: CallbackContext) -> None:
         current_position = get_open_position(symbol)
         if current_position and current_position['side'] != side:
             await update.message.reply_text(f"Closing the existing position for {symbol} before placing the {side} trade.")
-            close_position(symbol)
+            close_position(symbol, side)
 
         result = place_trade(symbol, side, qty)
         if result:
@@ -331,7 +343,7 @@ async def trade(update: Update, context: CallbackContext) -> None:
 # Run the Telegram Bot with Flask
 def main():
     """Run the bot.""" 
-    application = Application.builder().token(Bot).build()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add command handlers 
     application.add_handler(CommandHandler("start", start))
