@@ -162,26 +162,27 @@ def get_available_balance(symbol):
         return None
 
 # Function to close the open position
-def close_position(symbol):
-    position = get_open_position(symbol)
-    
-    if position:
-        qty = abs(float(position['qty']))  # The absolute quantity of the position to close
-        side = position['side']
-        
-        # If the current position is long, we need to sell to close it
-        if side == 'long':
-            logging.info(f"Closing long position for {symbol} by selling {qty} units.")
-            return place_trade(symbol, 'sell', qty)
-        
-        # If the current position is short, we need to buy to close it
-        elif side == 'short':
-            logging.info(f"Closing short position for {symbol} by buying {qty} units.")
-            return place_trade(symbol, 'buy', qty)
-    
-    logging.info(f"No open position for {symbol} to close.")
-    return None
+def close_position(symbol, action):
+    # Check if there is an existing position
+    current_position = get_open_position(symbol)
 
+    if action == "sell":
+        # If we have an open long position, close it by selling
+        if current_position and current_position['side'] == 'long':
+            logging.info(f"Received sell signal for {symbol}. Closing long position.")
+            close_position(symbol)  # Close the long position by selling
+        elif not current_position:
+            logging.info(f"No open position for {symbol}. Proceeding with sell.")
+        place_trade(symbol, 'sell')  # Proceed with the sell action (open or close)
+
+    elif action == "buy":
+        # If we have an open short position, close it by buying
+        if current_position and current_position['side'] == 'short':
+            logging.info(f"Received buy signal for {symbol}. Closing short position.")
+            close_position(symbol)  # Close the short position by buying
+        elif not current_position:
+            logging.info(f"No open position for {symbol}. Proceeding with buy.")
+        place_trade(symbol, 'buy')  # Proceed with the buy action (open or close)
 
 def send_telegram_message(message):
     """Send a notification to Telegram.""" 
