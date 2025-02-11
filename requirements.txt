@@ -5,3 +5,4 @@ apscheduler
 imapclient
 requests
 python-dotenv
+gunicorn
