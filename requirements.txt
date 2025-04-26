@@ -1,4 +1,4 @@
 alpaca-trade-api>=2.3.0,<3.0.0  # Use v2.x instead of problematic v3.0.0
 imapclient==2.3.1
 python-dotenv==1.0.0
-aiohttp==3.8.6
+aiohttp==3.8.1
