@@ -14,4 +14,4 @@ RUN pip install --upgrade pip wheel && \
 
 COPY . .
 
-CMD ["python", "app/main.py"]
+CMD ["python", "main.py"]
