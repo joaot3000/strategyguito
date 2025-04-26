@@ -1,0 +1,19 @@
+services:
+  alpaca-bot:
+    type: worker
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app/main.py
+    envVars:
+      - key: APCA_API_KEY_ID
+        fromEnv: APCA_API_KEY_ID
+      - key: APCA_API_SECRET_KEY
+        fromEnv: APCA_API_SECRET_KEY
+      - key: EMAIL_ADDRESS
+        fromEnv: EMAIL_ADDRESS
+      - key: EMAIL_PASSWORD
+        fromEnv: EMAIL_PASSWORD
+      - key: SYMBOL
+        value: SPY
+      - key: QTY
+        value: 3
