@@ -1,18 +1,23 @@
 services:
   alpaca-bot:
     type: worker
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app/main.py
+    dockerfile: Dockerfile  # Uses the Dockerfile above
     envVars:
+      # Alpaca API
       - key: APCA_API_KEY_ID
         fromEnv: APCA_API_KEY_ID
       - key: APCA_API_SECRET_KEY
         fromEnv: APCA_API_SECRET_KEY
+      - key: APCA_BASE_URL
+        value: https://paper-api.alpaca.markets
+
+      # Email
       - key: EMAIL_ADDRESS
         fromEnv: EMAIL_ADDRESS
       - key: EMAIL_PASSWORD
         fromEnv: EMAIL_PASSWORD
+
+      # Trading
       - key: SYMBOL
         value: SPY
       - key: QTY
