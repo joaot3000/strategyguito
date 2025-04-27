@@ -1,51 +1,27 @@
 from flask import Flask
 import threading
-import time
-from email_reader import get_latest_alert, parse_alert
-from alpaca_client import AlpacaTrader
 import logging
+import time
 
 app = Flask(__name__)
 
-# Initialize trading bot components
-trader = AlpacaTrader()
-last_processed = None
-
-# Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()]
+    handlers=[logging.StreamHandler()]
 )
 
-def process_alerts():
-    global last_processed
-    email_body = get_latest_alert()
-    if email_body != last_processed:
-        direction = parse_alert(email_body)
-        if direction:
-            logging.info(f"New signal: {direction.upper()}")
-            if trader.execute_trade(direction):
-                last_processed = email_body
-
-def run_bot():
-    logging.info("=== BOT THREAD STARTED ===")  # Add this line
+def dummy_bot():
     while True:
-        try:
-            process_alerts()
-            time.sleep(10)
-        except Exception as e:
-            logging.error(f"Bot crashed: {str(e)}")
-            time.sleep(5)  # Wait before restarting
-
-# Start thread
-thread = threading.Thread(target=run_bot, daemon=True)
-thread.start()
-logging.info(f"Thread active: {thread.is_alive()}")  # Verify thread state
+        logging.info("=== BOT IS ALIVE ===")
+        time.sleep(5)
 
 @app.route('/')
 def home():
-    return "Trading Bot Active | Check logs for trade signals"
+    return "Test running"
 
 if __name__ == '__main__':
+    # Start thread with explicit logging
+    threading.Thread(target=dummy_bot, daemon=True).start()
+    logging.info("Main thread started")
     app.run(host='0.0.0.0', port=5000)
