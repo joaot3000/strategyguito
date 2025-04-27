@@ -3,3 +3,5 @@ aiohttp==3.8.1  # Exact version required by alpaca-trade-api
 imapclient==2.3.1
 python-dotenv==1.0.0
 gunicorn==21.2.0  # or latest version
+flask>=2.0.0
+gevent>=21.8.0  # For async workers
