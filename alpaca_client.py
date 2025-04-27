@@ -1,47 +1,28 @@
-import alpaca_trade_api as tradeapi
-from config import Config
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 import logging
+from config import Config
 
 class AlpacaTrader:
     def __init__(self):
-        self.api = tradeapi.REST(
-            Config.APCA_API_KEY_ID,
-            Config.APCA_API_SECRET_KEY,
-            base_url=Config.APCA_BASE_URL
+        self.client = TradingClient(
+            Config.ALPACA_API_KEY,
+            Config.ALPACA_SECRET_KEY,
+            paper=True
         )
-    
-    def _close_position(self):
-        try:
-            position = self.api.get_position(Config.SYMBOL)
-            self.api.submit_order(
-                symbol=Config.SYMBOL,
-                qty=abs(float(position.qty)),
-                side='sell' if float(position.qty) > 0 else 'buy',
-                type='market',
-                time_in_force='gtc'
-            )
-            logging.info(f"Closed {position.qty} shares of {Config.SYMBOL}")
-            return True
-        except Exception as e:
-            if "404" in str(e):  # No position exists
-                return True
-            logging.error(f"Position close failed: {e}")
-            return False
-    
+
     def execute_trade(self, direction):
-        if not self._close_position():
-            return False
-        
         try:
-            self.api.submit_order(
-                symbol=Config.SYMBOL,
-                qty=Config.QTY,
-                side='buy' if direction == 'long' else 'sell',
-                type='market',
-                time_in_force='gtc'
+            order_data = MarketOrderRequest(
+                symbol="SPY",
+                qty=1,
+                side=OrderSide.BUY if direction == "buy" else OrderSide.SELL,
+                time_in_force=TimeInForce.DAY
             )
-            logging.info(f"Opened {direction} position: {Config.QTY} {Config.SYMBOL}")
+            order = self.client.submit_order(order_data)
+            logging.info(f"Order submitted: {order.id}")
             return True
         except Exception as e:
-            logging.error(f"Trade execution failed: {e}")
+            logging.error(f"Trade Error: {str(e)}")
             return False
