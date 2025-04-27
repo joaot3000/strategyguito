@@ -28,18 +28,20 @@ def process_alerts():
             if trader.execute_trade(direction):
                 last_processed = email_body
 
-# Run bot in background thread
 def run_bot():
-    logging.info("Bot started in background thread")
+    logging.info("=== BOT THREAD STARTED ===")  # Add this line
     while True:
         try:
             process_alerts()
             time.sleep(10)
         except Exception as e:
-            logging.error(f"Bot error: {e}")
+            logging.error(f"Bot crashed: {str(e)}")
+            time.sleep(5)  # Wait before restarting
 
-# Start thread when Flask initializes
-threading.Thread(target=run_bot, daemon=True).start()
+# Start thread
+thread = threading.Thread(target=run_bot, daemon=True)
+thread.start()
+logging.info(f"Thread active: {thread.is_alive()}")  # Verify thread state
 
 @app.route('/')
 def home():
