@@ -6,4 +6,4 @@ gunicorn==21.2.0  # or latest version
 flask>=2.0.0
 gevent>=21.8.0  # For async workers
 alpaca-py>=0.18.0
-imaplib2>=3.15.0
+imaplib2>=2.45.0
