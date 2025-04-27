@@ -1,18 +1,37 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
-
 class Config:
-    # Alpaca API
-    APCA_API_KEY_ID = os.getenv("APCA_API_KEY_ID")
-    APCA_API_SECRET_KEY = os.getenv("APCA_API_SECRET_KEY")
-    APCA_BASE_URL = os.getenv("APCA_BASE_URL", "https://paper-api.alpaca.markets")
+    # Load environment variables
+    load_dotenv()
     
-    # Email
-    EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
-    EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+    # Email Configuration
+    EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
+    EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+    IMAP_SERVER = os.getenv('IMAP_SERVER', 'imap.gmail.com')
     
-    # Trading
-    SYMBOL = os.getenv("SYMBOL", "SPY")
-    QTY = int(os.getenv("QTY", 3))
+    # Trading Configuration
+    ALPACA_API_KEY = os.getenv('ALPACA_API_KEY')
+    ALPACA_SECRET_KEY = os.getenv('ALPACA_SECRET_KEY')
+    PAPER_TRADING = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
+    
+    # Trade Execution Parameters
+    TRADE_SYMBOL = os.getenv('TRADE_SYMBOL', 'SPY')          # Default to SPY
+    TRADE_QUANTITY = float(os.getenv('TRADE_QUANTITY', 1))   # Default to 1 share
+    MAX_TRADE_SIZE = float(os.getenv('MAX_TRADE_SIZE', 10000)) # Dollar limit
+    
+    # Validation
+    @classmethod
+    def validate(cls):
+        required = [
+            'EMAIL_ADDRESS', 'EMAIL_PASSWORD',
+            'ALPACA_API_KEY', 'ALPACA_SECRET_KEY'
+        ]
+        missing = [var for var in required if not getattr(cls, var)]
+        if missing:
+            raise ValueError(f"Missing config: {', '.join(missing)}")
+        
+        if cls.TRADE_QUANTITY <= 0:
+            raise ValueError("TRADE_QUANTITY must be positive")
+
+Config.validate()
