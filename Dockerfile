@@ -1,8 +1,8 @@
-FROM python:3.9-slim  # Works with both 3.8 and 3.9
+FROM python:3.10-slim  # Python 3.10 recommended for best compatibility
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y gcc python3-dev && \
+    apt-get install -y gcc python3-dev libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
