@@ -1,4 +1,4 @@
-FROM python:3.10-slim  # Python 3.10 recommended for best compatibility
+FROM python:3.9-slim  # Explicitly using Python 3.9
 
 # Install system dependencies
 RUN apt-get update && \
