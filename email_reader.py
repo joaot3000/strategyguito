@@ -1,27 +1,30 @@
 import imaplib
 import email
+from email.header import decode_header
+import logging
 from config import Config
 
 def get_latest_alert():
-    mail = imaplib.IMAP4_SSL("imap.gmail.com")
-    mail.login(Config.EMAIL_ADDRESS, Config.EMAIL_PASSWORD)
-    mail.select("inbox")
-    
-    _, data = mail.search(None, '(FROM "noreply@tradingview.com")')
-    latest_email_id = data[0].split()[-1]
-    
-    _, msg_data = mail.fetch(latest_email_id, "(RFC822)")
-    msg = email.message_from_bytes(msg_data[0][1])
-    
-    if msg.is_multipart():
-        for part in msg.walk():
-            if part.get_content_type() == "text/plain":
-                return part.get_payload(decode=True).decode()
-    return msg.get_payload(decode=True).decode()
+    try:
+        mail = imaplib.IMAP4_SSL(Config.IMAP_SERVER)
+        mail.login(Config.EMAIL_ADDRESS, Config.EMAIL_PASSWORD)
+        mail.select("inbox")
+        
+        _, msgnums = mail.search(None, "UNSEEN")
+        if msgnums[0]:
+            latest_id = msgnums[0].split()[-1]
+            _, data = mail.fetch(latest_id, "(RFC822)")
+            msg = email.message_from_bytes(data[0][1])
+            return msg.get_payload()
+        return None
+    except Exception as e:
+        logging.error(f"Email Error: {str(e)}")
+        return None
 
 def parse_alert(email_body):
-    if "Buy" in email_body:
-        return 'long'
-    elif "Sell" in email_body:
-        return 'short'
+    # Implement your alert parsing logic
+    if "BUY" in email_body:
+        return "buy"
+    elif "SELL" in email_body:
+        return "sell"
     return None
