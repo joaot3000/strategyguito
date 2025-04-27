@@ -3,35 +3,59 @@ import threading
 import time
 import logging
 import sys
+from email_reader import get_latest_alert, parse_alert
+from alpaca_client import AlpacaTrader
 
 app = Flask(__name__)
 
-# Force all logs to Render's output
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bot.log')
+    ]
 )
 
-def trading_bot():
-    while True:
-        try:
-            logging.info("=== BOT ACTIVE ===")
-            # Your actual bot logic here
-            time.sleep(10)
-        except Exception as e:
-            logging.error(f"Bot error: {str(e)}")
-            time.sleep(60)
+class TradingBot:
+    def __init__(self):
+        self.trader = AlpacaTrader()
+        self.last_processed = None
+        self.active = True
 
-# Start bot thread when app starts
-with app.app_context():
-    bot_thread = threading.Thread(target=trading_bot, daemon=True)
-    bot_thread.start()
-    logging.info(f"Bot thread started (Alive: {bot_thread.is_alive()})")
+    def run(self):
+        logging.info("🚀 Bot Started")
+        while self.active:
+            try:
+                self.check_alerts()
+                time.sleep(10)
+            except Exception as e:
+                logging.error(f"Bot Error: {str(e)}", exc_info=True)
+                time.sleep(60)
+
+    def check_alerts(self):
+        alert = get_latest_alert()
+        if alert and alert != self.last_processed:
+            direction = parse_alert(alert)
+            if direction:
+                logging.info(f"📶 New Signal: {direction.upper()}")
+                if self.trader.execute_trade(direction):
+                    self.last_processed = alert
+                    logging.info("✅ Trade Executed")
+
+# Initialize bot
+bot = TradingBot()
+bot_thread = threading.Thread(target=bot.run, daemon=True)
+bot_thread.start()
 
 @app.route('/')
-def home():
-    return "Trading Bot is running in background"
+def status():
+    return {
+        "status": "running",
+        "bot_active": bot_thread.is_alive(),
+        "last_processed": bool(bot.last_processed)
+    }
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
